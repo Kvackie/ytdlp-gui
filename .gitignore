@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec
+!packaging/ytdlp-gui.spec
+.pytest_cache/
+.ruff_cache/
+.env
+ytdlp-gui-data/

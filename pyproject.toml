@@ -1,0 +1,17 @@
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["build", "dist"]
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, import sorting, bugbear, pyupgrade, simplify
+select = ["E", "W", "F", "I", "B", "UP", "SIM"]
+ignore = [
+    "SIM105",  # contextlib.suppress instead of try/except/pass: the explicit form reads fine here
+]
+
+[tool.ruff.lint.per-file-ignores]
+"packaging/ytdlp-gui.spec" = ["F821"]  # PyInstaller injects Analysis, PYZ, EXE, SPECPATH
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

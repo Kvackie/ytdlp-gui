@@ -1,0 +1,153 @@
+name: Build & release
+
+# Every push and "Run workflow" builds both executables, tests them (also on clean Debian 12 and 13)
+# and uploads them as workflow artifacts. Pushing a tag like v1.2.0 also publishes a GitHub Release.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows
+            os: windows-latest
+            binary: ytdlp-gui.exe
+            asset_suffix: windows-x64.exe
+          - name: linux
+            # Oldest supported runner = oldest glibc (2.35), so the binary also runs on Debian 12+.
+            os: ubuntu-22.04
+            binary: ytdlp-gui
+            asset_suffix: linux-x86_64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      # Not just for the tests: PyInstaller bundles these into the Linux file, so users don't have
+      # to install them (Qt needs libxcb-cursor0 & co. to open windows). Don't remove.
+      - name: Install Qt system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 \
+            libxcb-shape0 libxcb-xinerama0 libxcb-randr0 libxcb-render-util0 libxcb-image0 libdbus-1-3 libfontconfig1
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Set version from tag
+        id: version
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="$(python -c 'import ytdlp_gui; print(ytdlp_gui.__version__)')-dev.${GITHUB_RUN_NUMBER}"
+          fi
+          python - "$VERSION" <<'PY'
+          import re, sys
+          path = "ytdlp_gui/__init__.py"
+          text = open(path, encoding="utf-8").read()
+          open(path, "w", encoding="utf-8").write(re.sub(r'__version__ = ".*"', f'__version__ = "{sys.argv[1]}"', text))
+          PY
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Lint
+        run: python -m ruff check .
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Build executable
+        run: |
+          python packaging/version_info.py
+          pyinstaller packaging/ytdlp-gui.spec --noconfirm --distpath dist --workpath build
+
+      # Also downloads the real yt-dlp and runs it from inside the frozen app.
+      - name: Self-test the executable
+        run: |
+          chmod +x "dist/${{ matrix.binary }}" || true
+          "dist/${{ matrix.binary }}" --self-test selftest.json --install || { cat selftest.json; exit 1; }
+          cat selftest.json
+
+      - name: Rename for upload
+        run: |
+          mkdir upload
+          mv "dist/${{ matrix.binary }}" "upload/ytdlp-gui-${{ steps.version.outputs.version }}-${{ matrix.asset_suffix }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ytdlp-gui-${{ matrix.name }}
+          path: upload/*
+          if-no-files-found: error
+
+  debian:
+    name: Run on Debian ${{ matrix.release }}
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ["12", "13"]
+    runs-on: ubuntu-latest
+    container: debian:${{ matrix.release }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ytdlp-gui-linux
+
+      # A bare container lacks what every Debian desktop has (OpenGL, X11, fontconfig, CA certificates);
+      # nothing app-specific is installed here.
+      - name: Add the libraries of a standard desktop
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates libgl1 libegl1 libx11-xcb1 \
+            libxkbcommon0 libfontconfig1 libdbus-1-3
+
+      - name: Self-test
+        run: |
+          BIN="$(ls ytdlp-gui-*-linux-x86_64)"
+          chmod +x "$BIN"
+          "./$BIN" --self-test selftest.json --install || { cat selftest.json; exit 1; }
+          cat selftest.json
+
+  release:
+    name: Publish release
+    needs: [build, debian]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Checksums
+        run: cd artifacts && sha256sum * > SHA256SUMS
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
