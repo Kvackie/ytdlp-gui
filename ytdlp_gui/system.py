@@ -7,6 +7,7 @@ import shutil
 import signal
 import subprocess
 import sys
+from functools import cache
 from pathlib import Path
 
 from . import APP_ID
@@ -51,11 +52,13 @@ def bin_dir() -> Path:
     return path
 
 
+@cache
 def default_download_dir() -> Path:
     if IS_LINUX:
         # xdg-user-dir knows the localized name ("Téléchargements", ...); fall back to ~/Downloads.
         try:
-            out = subprocess.run(["xdg-user-dir", "DOWNLOAD"], capture_output=True, text=True, timeout=2)
+            out = subprocess.run(["xdg-user-dir", "DOWNLOAD"], capture_output=True, text=True, timeout=2,
+                                 env=child_env())
             candidate = Path(out.stdout.strip())
             if out.returncode == 0 and candidate.is_dir() and candidate != Path.home():
                 return candidate
