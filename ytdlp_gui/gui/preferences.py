@@ -78,9 +78,8 @@ class PreferencesDialog(QDialog):
         data.addWidget(open_btn)
         form.addRow("Data folder:", data)
         form.addRow(_hint(
-            "Settings, the queue and the downloaded tools live here. To make the app portable, create a folder "
-            f"named \"{system.PORTABLE_DIR_NAME}\" next to the executable and restart."
-            + ("  Portable mode is active." if system.is_portable() else "")))
+            "Settings, the queue and the downloaded tools live here, next to the executable. Move both "
+            "together to take the app elsewhere; delete both to remove every trace."))
 
         # Files
         form = _form(tabs, "Files")

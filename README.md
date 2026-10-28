@@ -56,13 +56,13 @@ on your system (e.g. `apt install ffmpeg`), you can skip downloading them and th
 
 ## Where things are kept
 
-Settings, the queue and the tools live in one folder:
+The app is fully portable. Settings, the queue and the tools live in a `ytdlp-gui-data` folder that it
+creates next to the executable; nothing is written to your user profile or the registry. Put the
+executable in its own folder (or on a USB stick), and move or copy the two together. Deleting both removes
+every trace.
 
-- Windows: `%LOCALAPPDATA%\ytdlp-gui`
-- Linux: `~/.local/share/ytdlp-gui`
-
-**Portable mode:** create a folder named `ytdlp-gui-data` next to the executable, and everything is kept
-there instead, e.g. to run it from a USB stick. Deleting that folder (or the one above) removes every trace.
+The executable has to be somewhere you can write to; it tells you if it can't create its folder (e.g. in
+`C:\Program Files` or `/usr/bin`).
 
 ## Troubleshooting
 

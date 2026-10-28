@@ -31,6 +31,17 @@ def main(argv: list[str] | None = None) -> int:
     # Everything the app imports is loaded by now, so the bootloader's DLL path is no longer needed.
     system.reset_dll_search_path()
 
+    problem = system.data_dir_problem()
+    if problem:
+        from PySide6.QtWidgets import QMessageBox
+
+        QMessageBox.critical(
+            None, APP_NAME,
+            f"{APP_NAME} keeps its settings and tools in a \"{system.DATA_DIR_NAME}\" folder next to the "
+            f"program, but can't write there:\n\n{problem}\n\n"
+            "Move the program to a folder you can write to (e.g. Documents, Desktop or a USB stick).")
+        return 1
+
     settings = Settings.load()
     theme.apply(app, settings.theme)
     components = Components()

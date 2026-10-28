@@ -10,7 +10,8 @@ python3 -m venv .venv
 ./run.sh                                           # Windows: run.bat
 ```
 
-Set `YTDLP_GUI_DATA=/some/folder` to use a separate data folder (settings, queue, tools) while developing.
+Run from source, the app keeps its data (settings, queue, tools) in `ytdlp-gui-data/` in the checkout,
+which git ignores. Set `YTDLP_GUI_DATA=/some/folder` to use a different data folder.
 
 ## Tests and lint
 

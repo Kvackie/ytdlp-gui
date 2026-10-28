@@ -258,8 +258,7 @@ class ComponentsDialog(QDialog):
         last = self.settings.last_update_check
         checked = time.strftime("%Y-%m-%d %H:%M", time.localtime(last)) if last else "never"
         where = system.bin_dir()
-        self.info.setText(f"Last checked: {checked}. Tools are stored in <a href='#'>{where}</a>"
-                          + ("  (portable mode)" if system.is_portable() else ""))
+        self.info.setText(f"Last checked: {checked}. Tools are stored in <a href='#'>{where}</a>")
         if self.setup:
             self.go_btn.setEnabled(not self.service.installing())
             if not self.service.installing() and self.go_btn.text() != "Retry":

@@ -16,9 +16,9 @@ IS_WINDOWS = sys.platform == "win32"
 IS_LINUX = sys.platform.startswith("linux")
 FROZEN = bool(getattr(sys, "frozen", False))
 
-# A folder with this name next to the executable switches the app to portable mode:
-# settings, queue and the downloaded tools are then kept there instead of the user profile.
-PORTABLE_DIR_NAME = f"{APP_ID}-data"
+# The app is always portable: settings, queue and the downloaded tools are kept in this folder next to
+# the executable, never in the user profile.
+DATA_DIR_NAME = f"{APP_ID}-data"
 
 
 def app_dir() -> Path:
@@ -29,21 +29,21 @@ def app_dir() -> Path:
 
 
 def data_dir() -> Path:
-    override = os.environ.get("YTDLP_GUI_DATA")
-    if override:
-        path = Path(override)
-    elif (app_dir() / PORTABLE_DIR_NAME).is_dir():
-        path = app_dir() / PORTABLE_DIR_NAME
-    elif IS_WINDOWS:
-        path = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / APP_ID
-    else:
-        path = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / APP_ID
+    override = os.environ.get("YTDLP_GUI_DATA")  # tests and the self-test use a throwaway folder
+    path = Path(override) if override else app_dir() / DATA_DIR_NAME
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
-def is_portable() -> bool:
-    return data_dir() == app_dir() / PORTABLE_DIR_NAME
+def data_dir_problem() -> str | None:
+    """Why the data folder can't be used (e.g. the executable sits in a read-only place), or None."""
+    try:
+        probe = data_dir() / ".write-test"
+        probe.write_bytes(b"")
+        probe.unlink()
+    except OSError as e:
+        return f"{app_dir() / DATA_DIR_NAME}: {e.strerror or e}"
+    return None
 
 
 def bin_dir() -> Path:
