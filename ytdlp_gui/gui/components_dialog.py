@@ -178,21 +178,15 @@ class ComponentsDialog(QDialog):
         self.service = service
         self.settings = settings
         self.setup = setup
-        self.setWindowTitle("Set up yt-dlp GUI" if setup else "Tools & updates")
+        title = "Setup" if setup else "Tools & updates"
+        self.setWindowTitle(title)
         self.setMinimumWidth(620)
 
         lay = QVBoxLayout(self)
         lay.setSpacing(10)
-        heading = QLabel("Welcome!" if setup else "Tools & updates")
+        heading = QLabel(title)
         heading.setObjectName("heading")
         lay.addWidget(heading)
-        if setup:
-            intro = QLabel("yt-dlp GUI runs yt-dlp and a few helper tools. They are downloaded once from their "
-                           "official GitHub releases, checked against the published checksums, and kept up to "
-                           "date for you.")
-            intro.setWordWrap(True)
-            intro.setObjectName("muted")
-            lay.addWidget(intro)
 
         shown = service.components.tools() if setup else service.components.all()
         self.cards = {c.key: ComponentCard(c, service, setup, self) for c in shown}
@@ -229,6 +223,7 @@ class ComponentsDialog(QDialog):
         self.info = QLabel()
         self.info.setObjectName("muted")
         self.info.setWordWrap(True)
+        self.info.setVisible(not setup)  # nothing has been checked yet on first start
         lay.addWidget(self.info)
 
         buttons = QHBoxLayout()
