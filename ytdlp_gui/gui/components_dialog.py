@@ -51,6 +51,7 @@ class ComponentCard(QFrame):
         desc = QLabel(comp.description)
         desc.setObjectName("muted")
         desc.setWordWrap(True)
+        desc.setVisible(bool(comp.description))
 
         self.bar = QProgressBar()
         self.bar.setTextVisible(False)
@@ -113,15 +114,13 @@ class ComponentCard(QFrame):
         if app and comp.restart_pending:
             text = f"Version {__version__}  ·  <b>{comp.restart_pending} is installed</b>, restart to use it"
         elif app and not comp.supported():
-            text = f"Version {__version__}  ·  updates itself only in the released Windows and Linux builds"
+            text = f"Version {__version__}"
         elif not comp.supported() and not comp.path():
             text = "No build is available for this system. Install it with your package manager."
         elif comp.is_managed():
-            text = f"{'Version' if app else 'Installed'}: {comp.installed_version() or 'unknown version'}"
+            text = f"Version {comp.installed_version() or 'unknown'}"
             if service.update_available(comp.key):
                 text += f"  ·  <b>update available</b> ({latest.version})"
-            elif latest:
-                text += "  ·  up to date"
         elif comp.system_path():
             text = "Installed on this system"
         else:
@@ -187,16 +186,13 @@ class ComponentsDialog(QDialog):
         heading = QLabel("Welcome!" if setup else "Tools & updates")
         heading.setObjectName("heading")
         lay.addWidget(heading)
-        intro = QLabel(
-            "yt-dlp GUI runs yt-dlp and a few helper tools. They are downloaded once from their official "
-            "GitHub releases, checked against the published checksums, and kept up to date for you."
-            if setup else
-            "The app and its tools are updated from their official GitHub releases. Tools already installed "
-            "on this system are used as they are."
-        )
-        intro.setWordWrap(True)
-        intro.setObjectName("muted")
-        lay.addWidget(intro)
+        if setup:
+            intro = QLabel("yt-dlp GUI runs yt-dlp and a few helper tools. They are downloaded once from their "
+                           "official GitHub releases, checked against the published checksums, and kept up to "
+                           "date for you.")
+            intro.setWordWrap(True)
+            intro.setObjectName("muted")
+            lay.addWidget(intro)
 
         shown = service.components.tools() if setup else service.components.all()
         self.cards = {c.key: ComponentCard(c, service, setup, self) for c in shown}
@@ -270,7 +266,11 @@ class ComponentsDialog(QDialog):
         self.check_btn.setText("Checking…" if self.service.checking else "Check for updates")
         last = self.settings.last_update_check
         checked = time.strftime("%Y-%m-%d %H:%M", time.localtime(last)) if last else "never"
-        self.info.setText(f"Last checked: {checked}.")
+        text = f"Last checked: {checked}."
+        service = self.service
+        if service.latest and not service.checking and not service.errors and not service.updates_available():
+            text += " Already on latest version."
+        self.info.setText(text)
         if self.setup:
             self.go_btn.setEnabled(not self.service.installing())
             if not self.service.installing() and self.go_btn.text() != "Retry":

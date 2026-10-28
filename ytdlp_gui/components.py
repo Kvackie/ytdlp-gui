@@ -256,7 +256,7 @@ def _extract(archive: Path, dest: Path, pick: Callable[[str], str | None]) -> li
 class YtDlp(Component):
     key = "yt-dlp"
     title = "yt-dlp"
-    description = "The downloader itself. Required."
+    description = "Downloads video and audio from YouTube and thousands of other sites."
     required = True
     download_size = "~25-40 MB"
 
@@ -310,7 +310,7 @@ class YtDlp(Component):
 class Ffmpeg(Component):
     key = "ffmpeg"
     title = "FFmpeg"
-    description = "Merges video and audio, converts audio, embeds thumbnails and subtitles. Recommended."
+    description = "Merges video and audio, converts audio, embeds thumbnails and subtitles."
     download_size = "~90-160 MB"
     version_args = ("-version",)
 
@@ -376,7 +376,7 @@ class Ffmpeg(Component):
 class Deno(Component):
     key = "deno"
     title = "Deno"
-    description = "JavaScript runtime yt-dlp needs for full YouTube support. Recommended."
+    description = "JavaScript runtime yt-dlp needs for full YouTube support."
     download_size = "~40 MB"
 
     def asset_name(self) -> str | None:
@@ -428,7 +428,6 @@ class App(Component):
 
     key = "app"
     title = APP_NAME
-    description = "This program, updated from its GitHub releases."
     download_size = "~40 MB"
 
     def __init__(self, state: State):
