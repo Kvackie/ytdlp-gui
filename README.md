@@ -39,6 +39,10 @@ Get the file for your system from the [latest release](../../releases/latest):
   "skip what I already downloaded", custom file names, and any other yt-dlp option you want to add.
 - **Queue that survives restarts:** unfinished downloads pick up where they left off next time.
   *Pause queue* lets running downloads finish but starts no new ones until you resume it.
+- **No broken files left behind:** a failed download keeps what it got so far, and *Retry* continues
+  from there (right-click → *Retry from scratch* starts over). Cancelling a download deletes its files;
+  removing a failed one deletes its downloaded parts. *Clear* removes finished and cancelled downloads
+  and keeps failed ones for retrying.
 - Light and dark theme, optional clipboard watching.
 
 ## The tools it manages

@@ -23,6 +23,7 @@ MARK_ITEM = "[ytg:item]"
 MARK_PROGRESS = "[ytg:progress]"
 MARK_POSTPROCESS = "[ytg:pp]"
 MARK_FILE = "[ytg:file]"
+MARK_TARGET = "[ytg:target]"  # the final path of an item, announced before it downloads
 FIELD_SEP = "\x1f"  # unit separator: never part of a title or path
 
 
@@ -145,6 +146,7 @@ def build_args(o: DownloadOptions, urls: list[str], tools: ToolPaths) -> list[st
         f"%(progress.eta)s{sep}%(info.format_id)s",
         "--progress-template", f"postprocess:{MARK_POSTPROCESS}%(progress.postprocessor)s{sep}%(progress.status)s",
         "-O", f"video:{MARK_ITEM}%(id)s{sep}%(title)s{sep}%(playlist_index|)s{sep}%(n_entries|)s",
+        "-O", f"before_dl:{MARK_TARGET}%(filename)s",
         "-O", f"after_move:{MARK_FILE}%(filepath)s",
     ]
     if tools.ffmpeg_dir:

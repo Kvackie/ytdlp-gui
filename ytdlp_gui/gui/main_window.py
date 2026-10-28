@@ -180,11 +180,13 @@ class MainWindow(QMainWindow):
         self.cancel_btn = QPushButton("Cancel")
         self.cancel_btn.clicked.connect(lambda: self.queue.cancel(self.selected_ids()))
         self.retry_btn = QPushButton("Retry")
+        self.retry_btn.setToolTip("Continue from what was already downloaded. Right-click a download to start "
+                                  "it from scratch instead.")
         self.retry_btn.clicked.connect(lambda: self.queue.retry(self.selected_ids()))
         self.remove_btn = QPushButton("Remove")
         self.remove_btn.clicked.connect(self.remove_selected)
         clear_btn = QPushButton("Clear")
-        clear_btn.setToolTip("Remove every download that is no longer queued or running")
+        clear_btn.setToolTip("Remove finished and cancelled downloads. Failed ones stay so they can be retried.")
         clear_btn.clicked.connect(self.queue.clear_finished)
         for b in (self.run_btn, self.cancel_btn, self.retry_btn, self.remove_btn, clear_btn):
             bar.addWidget(b)
@@ -554,10 +556,17 @@ class MainWindow(QMainWindow):
 
     def remove_selected(self) -> None:
         ids = self.selected_ids()
-        running = [i for i in ids if self.queue.jobs[i].status.active]
+        jobs = [self.queue.jobs[i] for i in ids]
+        running = sum(1 for j in jobs if j.status.active)
+        resumable = sum(1 for j in jobs if j.status in (Status.FAILED, Status.PARTIAL) and j.targets)
+        question = []
         if running:
-            answer = QMessageBox.question(self, "Remove downloads",
-                                          f"{len(running)} of these are still downloading. Cancel and remove them?")
+            question.append(f"{running} of these {'is' if running == 1 else 'are'} still downloading.")
+        if resumable:
+            question.append(f"{resumable} failed download{'s' if resumable != 1 else ''} could still be retried; "
+                            "the parts downloaded so far will be deleted.")
+        if question:
+            answer = QMessageBox.question(self, "Remove downloads", " ".join(question) + "\n\nRemove anyway?")
             if answer != QMessageBox.StandardButton.Yes:
                 return
         self.queue.remove(ids)
@@ -602,6 +611,7 @@ class MainWindow(QMainWindow):
             menu.addAction("Cancel", lambda: self.queue.cancel(self.selected_ids()))
         if job.status.finished:
             menu.addAction("Retry", lambda: self.queue.retry(self.selected_ids()))
+            menu.addAction("Retry from scratch", lambda: self.queue.retry(self.selected_ids(), fresh=True))
         menu.addAction("Remove", self.remove_selected)
         menu.exec(self.table.viewport().mapToGlobal(pos))
 

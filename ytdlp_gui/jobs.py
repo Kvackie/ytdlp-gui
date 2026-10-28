@@ -6,7 +6,15 @@ from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 
-from .options import FIELD_SEP, MARK_FILE, MARK_ITEM, MARK_POSTPROCESS, MARK_PROGRESS, DownloadOptions
+from .options import (
+    FIELD_SEP,
+    MARK_FILE,
+    MARK_ITEM,
+    MARK_POSTPROCESS,
+    MARK_PROGRESS,
+    MARK_TARGET,
+    DownloadOptions,
+)
 
 
 class Status(Enum):
@@ -73,6 +81,9 @@ class Job:
     speed: float | None = None
     eta: float | None = None
     files: list[str] = field(default_factory=list)
+    # Final paths yt-dlp announced, kept across retries: what to look for when cleaning up leftovers.
+    targets: list[str] = field(default_factory=list)
+    fresh: bool = False  # the next run ignores earlier parts (Retry from scratch)
     error: str = ""
     warnings: list[str] = field(default_factory=list)
     log: deque[str] = field(default_factory=lambda: deque(maxlen=3000))
@@ -80,6 +91,7 @@ class Job:
     started_at: float = 0.0
     finished_at: float = 0.0
     _formats_seen: list[str] = field(default_factory=list)
+    _error_follows: bool = False  # yt-dlp printed a bare "ERROR:" with the message on the next line
 
     @property
     def display_title(self) -> str:
@@ -99,6 +111,7 @@ class Job:
         self.files.clear()
         self.item_index = self.item_count = 0
         self._formats_seen.clear()
+        self._error_follows = False
         self.started_at = time.time()
         self.finished_at = 0.0
         self.add_log_line("")  # keeps log_seq moving so viewers notice the reset
@@ -114,6 +127,10 @@ class Job:
             self._on_progress(line[len(MARK_PROGRESS):].split(FIELD_SEP))
             return  # progress lines would drown the log
         self.add_log_line(line)
+        if self._error_follows:
+            self._error_follows = False
+            self.error = line.strip()
+            return
         if line.startswith(MARK_ITEM):
             self._on_item(line[len(MARK_ITEM):].split(FIELD_SEP))
         elif line.startswith(MARK_POSTPROCESS):
@@ -126,8 +143,13 @@ class Job:
             path = line[len(MARK_FILE):].strip()
             if path and path != "NA" and path not in self.files:
                 self.files.append(path)
+        elif line.startswith(MARK_TARGET):
+            path = line[len(MARK_TARGET):].strip()
+            if path and path != "NA" and path not in self.targets:
+                self.targets.append(path)
         elif line.startswith("ERROR:"):
             self.error = line[len("ERROR:"):].strip()
+            self._error_follows = not self.error
         elif line.startswith("WARNING:"):
             self.warnings.append(line[len("WARNING:"):].strip())
         elif line.startswith("[download] Downloading playlist:"):
@@ -199,6 +221,7 @@ class Job:
             "title": self.title,
             "playlist_title": self.playlist_title,
             "files": self.files,
+            "targets": self.targets,
             "error": self.error,
         }
 
@@ -211,6 +234,7 @@ class Job:
         job.title = data.get("title", "")
         job.playlist_title = data.get("playlist_title", "")
         job.files = list(data.get("files") or [])
+        job.targets = list(data.get("targets") or [])
         job.error = data.get("error", "")
         if job.status in (Status.DONE, Status.PARTIAL):
             job.progress = 1.0

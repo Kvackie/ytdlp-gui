@@ -11,21 +11,38 @@ from ytdlp_gui.gui.formats_dialog import compose_selector
 from ytdlp_gui.gui.main_window import MainWindow, extract_urls
 from ytdlp_gui.gui.queue import QueueManager
 from ytdlp_gui.jobs import Status
-from ytdlp_gui.options import FIELD_SEP, MARK_FILE, MARK_ITEM, MARK_PROGRESS, DownloadOptions, ToolPaths
+from ytdlp_gui.options import (
+    FIELD_SEP,
+    MARK_FILE,
+    MARK_ITEM,
+    MARK_PROGRESS,
+    MARK_TARGET,
+    DownloadOptions,
+    ToolPaths,
+)
 from ytdlp_gui.settings import Settings
 
 FAKE_YTDLP = textwrap.dedent(f"""
-    import sys, time
+    import os, sys, time
     url = sys.argv[-1]
     S = {FIELD_SEP!r}
     if "fail" in url:
         print("ERROR: [generic] Unsupported URL: " + url, flush=True)
         sys.exit(1)
+    target = os.path.join(os.getcwd(), "Fake video [" + url.rsplit("/", 1)[-1] + "].mp4")
     print({MARK_ITEM!r} + "id1" + S + "Fake video" + S + S, flush=True)
+    print({MARK_TARGET!r} + target, flush=True)
     for done in (25, 50, 100):
+        with open(target + ".part", "a") as part:
+            part.write("x" * 25)
+        if "breaks" in url and done == 50:
+            print("ERROR: ", flush=True)
+            print("[download] Got error: connection lost. Giving up after 10 retries", flush=True)
+            sys.exit(1)
         print({MARK_PROGRESS!r} + S.join(["downloading", str(done), "100", "NA", "1000", "1", "18"]), flush=True)
         time.sleep(0.05 if "slow" not in url else 2)
-    print({MARK_FILE!r} + "/tmp/Fake video [id1].mp4", flush=True)
+    os.replace(target + ".part", target)
+    print({MARK_FILE!r} + target, flush=True)
 """)
 
 
@@ -62,7 +79,7 @@ def test_queue_runs_jobs_to_completion(qtbot, fake_ytdlp, tmp_path):
     ok, bad = jobs
     assert ok.status == Status.DONE, list(ok.log)
     assert ok.title == "Fake video"
-    assert ok.files == ["/tmp/Fake video [id1].mp4"]
+    assert ok.files == [str(tmp_path / "Fake video [1].mp4")]
     assert bad.status == Status.FAILED
     assert "Unsupported URL" in bad.error
 
@@ -105,14 +122,14 @@ def test_main_window_adds_links(qtbot, monkeypatch, tmp_path):
     assert Settings.load().options.mode == "audio"
 
 
-def test_clear_removes_every_finished_job(qtbot):
+def test_clear_keeps_what_can_be_retried(qtbot):
     q = QueueManager(lambda: None, paused=True)
     jobs = q.add([f"https://example.com/{i}" for i in range(5)], DownloadOptions())
     statuses = (Status.DONE, Status.FAILED, Status.PARTIAL, Status.CANCELLED, Status.QUEUED)
     for job, status in zip(jobs, statuses, strict=True):
         job.status = status
     q.clear_finished()
-    assert list(q.jobs) == [jobs[-1].id]
+    assert [q.jobs[i].status for i in q.jobs] == [Status.FAILED, Status.PARTIAL, Status.QUEUED]
 
 
 def test_adding_links_does_not_resume_a_paused_queue(qtbot, monkeypatch):
@@ -128,3 +145,37 @@ def test_adding_links_does_not_resume_a_paused_queue(qtbot, monkeypatch):
     window._set_paused(True)
     assert window.run_btn.text() == "Resume queue"
     window.close()
+
+
+def test_failed_download_keeps_its_parts_until_removed(qtbot, fake_ytdlp, tmp_path):
+    q = QueueManager(lambda: fake_ytdlp)
+    (job,) = q.add(["https://breaks.example/v1"], DownloadOptions(output_dir=str(tmp_path)))
+    qtbot.waitUntil(lambda: job.status.finished, timeout=20000)
+    assert job.status == Status.FAILED
+    assert job.error == "[download] Got error: connection lost. Giving up after 10 retries"
+    part = tmp_path / "Fake video [v1].mp4.part"
+    assert part.exists()  # a retry continues from here
+    q.remove([job.id])
+    qtbot.waitUntil(lambda: not part.exists(), timeout=5000)
+
+
+def test_cancelled_download_is_deleted(qtbot, fake_ytdlp, tmp_path):
+    q = QueueManager(lambda: fake_ytdlp)
+    out = tmp_path / "downloads"
+    (job,) = q.add(["https://slow.example/v2"], DownloadOptions(output_dir=str(out)))
+    part = out / "Fake video [v2].mp4.part"
+    qtbot.waitUntil(part.exists, timeout=20000)
+    q.cancel([job.id])
+    qtbot.waitUntil(lambda: job.status == Status.CANCELLED, timeout=20000)
+    qtbot.waitUntil(lambda: not part.exists(), timeout=5000)
+    assert list(out.iterdir()) == []
+
+
+def test_retry_from_scratch_deletes_parts_first(qtbot, fake_ytdlp, tmp_path):
+    q = QueueManager(lambda: fake_ytdlp)
+    (job,) = q.add(["https://breaks.example/v3"], DownloadOptions(output_dir=str(tmp_path)))
+    qtbot.waitUntil(lambda: job.status.finished, timeout=20000)
+    q.paused = True
+    q.retry([job.id], fresh=True)
+    assert not (tmp_path / "Fake video [v3].mp4.part").exists()
+    assert job.fresh and job.status == Status.QUEUED

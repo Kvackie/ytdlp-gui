@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import __version__, system
+from .. import __version__
 from ..components import YTDLP_CHANNELS, App, Component
 from ..settings import Settings
 from .queue_model import human_bytes
@@ -233,8 +233,6 @@ class ComponentsDialog(QDialog):
         self.info = QLabel()
         self.info.setObjectName("muted")
         self.info.setWordWrap(True)
-        self.info.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
-        self.info.linkActivated.connect(lambda _: system.open_path(system.bin_dir()))
         lay.addWidget(self.info)
 
         buttons = QHBoxLayout()
@@ -272,7 +270,7 @@ class ComponentsDialog(QDialog):
         self.check_btn.setText("Checking…" if self.service.checking else "Check for updates")
         last = self.settings.last_update_check
         checked = time.strftime("%Y-%m-%d %H:%M", time.localtime(last)) if last else "never"
-        self.info.setText(f"Last checked: {checked}.  <a href='#'>Open the tools folder</a>")
+        self.info.setText(f"Last checked: {checked}.")
         if self.setup:
             self.go_btn.setEnabled(not self.service.installing())
             if not self.service.installing() and self.go_btn.text() != "Retry":

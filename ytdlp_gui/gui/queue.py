@@ -13,6 +13,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Qt, Signal
 
 from .. import system
+from ..cleanup import remove_leftovers
 from ..jobs import Job, Status
 from ..options import FIELD_SEP, DownloadOptions, ToolPaths, build_args
 
@@ -27,6 +28,7 @@ class QueueManager(QObject):
 
     _line = Signal(int, str)
     _exited = Signal(int, object)
+    _cleaned = Signal(int, int)  # job id, number of files deleted
 
     def __init__(self, tools: Callable[[], ToolPaths | None], max_concurrent: int = 2, paused: bool = False):
         super().__init__()
@@ -34,12 +36,14 @@ class QueueManager(QObject):
         self._tools = tools
         self._procs: dict[int, subprocess.Popen] = {}
         self._cancelling: set[int] = set()
+        self._discarded: dict[int, Job] = {}  # removed while running; cleaned up once stopped
         self._next_id = 1
         self.max_concurrent = max_concurrent
         self.paused = paused
         self.blocked = False  # set while yt-dlp or its helpers are being replaced
         self._line.connect(self._on_line, Qt.ConnectionType.QueuedConnection)
         self._exited.connect(self._on_exit, Qt.ConnectionType.QueuedConnection)
+        self._cleaned.connect(self._on_cleaned, Qt.ConnectionType.QueuedConnection)
 
     # --- queries ---------------------------------------------------------------------------------
     @property
@@ -82,21 +86,22 @@ class QueueManager(QObject):
             job = self.jobs.get(job_id)
             if not job:
                 continue
-            proc = self._procs.get(job_id)
-            if proc is not None:
-                if job_id not in self._cancelling:
-                    self._cancelling.add(job_id)
-                    job.phase = "Cancelling"
-                    self.job_changed.emit(job_id)
-                    threading.Thread(target=system.kill_tree, args=(proc,), daemon=True).start()
+            if job_id in self._procs:
+                self.cancel_process(job_id, job)  # its files are deleted once it has stopped
             elif job.status == Status.QUEUED:
                 job.status = Status.CANCELLED
+                self._clean(job)  # parts of an earlier failed run
                 self.job_changed.emit(job_id)
 
-    def retry(self, ids: list[int]) -> None:
+    def retry(self, ids: list[int], fresh: bool = False) -> None:
+        """Queue finished jobs again. yt-dlp continues from the parts already downloaded, unless `fresh`:
+        then those are deleted first and existing files are overwritten."""
         for job_id in ids:
             job = self.jobs.get(job_id)
             if job and job.status.finished:
+                if fresh:
+                    self._clean(job, background=False)
+                    job.fresh = True
                 job.status = Status.QUEUED
                 job.error = ""
                 job.progress = None
@@ -105,15 +110,29 @@ class QueueManager(QObject):
         self.schedule()
 
     def remove(self, ids: list[int]) -> None:
-        self.cancel([i for i in ids if i in self._procs])
+        """Drop jobs from the queue, deleting the parts an unfinished one leaves behind."""
         for job_id in ids:
-            if job_id in self.jobs:
-                del self.jobs[job_id]
-                self.job_removed.emit(job_id)
+            job = self.jobs.pop(job_id, None)
+            if job is None:
+                continue
+            if job_id in self._procs:
+                self._discarded[job_id] = job
+                self.cancel_process(job_id, job)
+            else:
+                self._clean(job)
+            self.job_removed.emit(job_id)
+
+    def cancel_process(self, job_id: int, job: Job) -> None:
+        if job_id not in self._cancelling:
+            self._cancelling.add(job_id)
+            job.phase = "Cancelling"
+            self.job_changed.emit(job_id)
+            threading.Thread(target=system.kill_tree, args=(self._procs[job_id],), daemon=True).start()
 
     def clear_finished(self) -> None:
-        """Drop every job that is neither queued nor running: done, failed, partial and cancelled ones."""
-        self.remove([j.id for j in self.jobs.values() if j.status.finished])
+        """Drop done and cancelled jobs. Failed and partial ones stay: a retry continues from their
+        downloaded parts, so only the user removes them."""
+        self.remove([j.id for j in self.jobs.values() if j.status in (Status.DONE, Status.CANCELLED)])
 
     def shutdown(self) -> None:
         """Stop every running download (on quit)."""
@@ -139,6 +158,9 @@ class QueueManager(QObject):
             return False
 
         args = build_args(job.options, [job.url], tools)
+        if job.fresh:
+            args[-2:-2] = ["--force-overwrites", "--no-continue"]  # before "--" and the link
+            job.fresh = False
         job.reset_for_run()
         shown = subprocess.list2cmdline(args) if system.IS_WINDOWS else shlex.join(args)
         job.add_log_line("$ " + shown.replace(FIELD_SEP, "|"))
@@ -185,13 +207,43 @@ class QueueManager(QObject):
         self._procs.pop(job_id, None)
         cancelled = job_id in self._cancelling
         self._cancelling.discard(job_id)
+        discarded = self._discarded.pop(job_id, None)
+        if discarded:
+            self._clean(discarded, since=discarded.started_at)
         job = self.jobs.get(job_id)
         if job:
             job.finish(returncode, cancelled)
+            if cancelled:
+                self._clean(job, since=job.started_at)
             self.job_changed.emit(job_id)
             self.job_finished.emit(job)
         self.activity_changed.emit()
         self.schedule()
+
+    # --- leftovers -------------------------------------------------------------------------------
+    def _clean(self, job: Job, since: float | None = None, background: bool = True) -> None:
+        """Delete what the job's unfinished items left behind (see cleanup.py). With `since` (a
+        cancelled run), everything those items wrote since then goes, not only temporary files."""
+        if not job.targets:
+            return
+        targets, completed = list(job.targets), list(job.files)
+        root = Path(job.options.output_dir or system.default_download_dir())
+        job.targets.clear()
+
+        def work() -> None:
+            deleted = remove_leftovers(targets, completed, root, since)
+            self._cleaned.emit(job.id, len(deleted))
+
+        if background:
+            threading.Thread(target=work, daemon=True).start()
+        else:
+            work()
+
+    def _on_cleaned(self, job_id: int, count: int) -> None:
+        job = self.jobs.get(job_id)
+        if job and count:
+            job.add_log_line(f"[ytdlp-gui] Deleted {count} leftover file{'s' if count != 1 else ''}.")
+            self.job_changed.emit(job_id)
 
     # --- persistence -----------------------------------------------------------------------------
     def save(self, path: Path) -> None:

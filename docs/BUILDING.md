@@ -22,6 +22,28 @@ QT_QPA_PLATFORM=offscreen python -m pytest -q
 
 The tests use a stand-in for yt-dlp and need no network.
 
+## Trying failed and partial downloads
+
+`devtools/test_server.py` serves downloads that fail on purpose, to try Retry, Cancel, Remove and
+*Retry from scratch* with the real yt-dlp:
+
+```bash
+python devtools/test_server.py      # needs FFmpeg once, to make the test video
+```
+
+Open http://127.0.0.1:8765/ for links to paste into the app (reload the page for fresh names):
+
+| Link | What happens |
+| --- | --- |
+| `/ok/NAME.mp4` | downloads normally |
+| `/flaky/NAME.mp4` | breaks off halfway and the server refuses connections for 20 s: **Failed**, with a `.part` file. Retry after the 20 s and the log shows *Resuming download at byte …* |
+| `/broken/NAME.mp4` | breaks off halfway and never recovers: always **Failed**. Remove (or *Retry from scratch*) deletes the `.part` file |
+| `/missing/NAME.mp4` | 404: **Failed** at once, nothing written |
+| `/playlist/NAME.html` | three videos, the middle one flaky: **Done with errors** at first, **Done** after a Retry (tick *Whole playlist*) |
+| `/partial/NAME.html` | three videos, the middle one missing: always **Done with errors** (tick *Whole playlist*) |
+
+Cancel any download midway to see its files deleted.
+
 ## Single-file executables
 
 ```bash
@@ -55,11 +77,13 @@ The version comes from the tag; `ytdlp_gui/__init__.py` holds the version for de
 | --- | --- |
 | `ytdlp_gui/system.py` | data folder, platform/architecture detection, running and stopping child processes |
 | `ytdlp_gui/net.py` | HTTP helpers, latest-release lookup, checksum parsing |
-| `ytdlp_gui/components.py` | yt-dlp / FFmpeg / Deno: which build fits, install, update, remove |
+| `ytdlp_gui/components.py` | the app itself, yt-dlp / FFmpeg / Deno: which build fits, install, update, remove |
 | `ytdlp_gui/options.py` | download options → yt-dlp command line |
 | `ytdlp_gui/jobs.py` | a queued download and how yt-dlp's output updates it |
+| `ytdlp_gui/cleanup.py` | which files an unfinished download left behind, and deleting them |
 | `ytdlp_gui/gui/` | Qt windows, the queue runner and the update service |
 | `packaging/` | PyInstaller spec, entry point with self-test, icon |
+| `devtools/` | local server with downloads that fail on purpose |
 
 Progress is read from yt-dlp's `--progress-template` and `--print` output (marked `[ytg:…]`), not from its
 human-readable log, so it doesn't break when that wording changes.

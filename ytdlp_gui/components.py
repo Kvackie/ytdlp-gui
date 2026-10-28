@@ -466,11 +466,14 @@ class App(Component):
             if err.code == 404:
                 raise RuntimeError(f"No public releases found at github.com/{APP_REPO}.") from err
             raise
+        url = net.release_asset_url(APP_REPO, tag, asset)
+        if version_key(tag) <= version_key(__version__):
+            return Release(tag, tag.lstrip("v"), asset, url, None)  # nothing newer: no need for its files
         sums = net.get_text(net.release_asset_url(APP_REPO, tag, "SHA256SUMS"))
         sha = net.find_sha256(sums, asset)
         if not sha:
             raise RuntimeError(f"{asset} is not part of release {tag}.")
-        return Release(tag, tag.lstrip("v"), asset, net.release_asset_url(APP_REPO, tag, asset), sha)
+        return Release(tag, tag.lstrip("v"), asset, url, sha)
 
     def update_available(self, release: Release) -> bool:
         return (self.is_managed() and not self.restart_pending

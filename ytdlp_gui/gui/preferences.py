@@ -67,7 +67,7 @@ class PreferencesDialog(QDialog):
         # General
         form = _form(tabs, "General")
         self.theme = QComboBox()
-        for label, value in (("Follow system", "system"), ("Light", "light"), ("Dark", "dark")):
+        for label, value in (("Use system", "system"), ("Light", "light"), ("Dark", "dark")):
             self.theme.addItem(label, value)
         self.theme.setCurrentIndex(max(0, self.theme.findData(settings.theme)))
         form.addRow("Theme:", self.theme)
