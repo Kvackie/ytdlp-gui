@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import re
 import sys
-import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -48,7 +47,6 @@ from .queue_model import COL_FORMAT, COL_PROGRESS, COL_STATUS, COL_TITLE, JOB_RO
 from .updates import UpdateService
 
 URL_RE = re.compile(r"https?://[^\s<>\"'`]+", re.IGNORECASE)
-UPDATE_CHECK_INTERVAL = 6 * 3600
 
 
 def extract_urls(text: str) -> list[str]:
@@ -102,9 +100,6 @@ class MainWindow(QMainWindow):
         self._log_timer = QTimer(self, interval=300)
         self._log_timer.timeout.connect(self._refresh_log)
         self._log_timer.start()
-        self._update_timer = QTimer(self, interval=3600 * 1000)
-        self._update_timer.timeout.connect(self._maybe_check_updates)
-        self._update_timer.start()
 
         if settings.window_geometry:
             self.restoreGeometry(QByteArray.fromBase64(settings.window_geometry.encode()))
@@ -726,13 +721,8 @@ class MainWindow(QMainWindow):
             self.open_setup()
         else:
             self.queue.schedule()
-        # Every start, also right after the first-run setup; the hourly timer below waits between checks.
+        # Once per start, also right after the first-run setup.
         if self.settings.check_updates:
-            self.updates.check(auto=True)
-
-    def _maybe_check_updates(self) -> None:
-        """While the app stays open: check again once the last check is a while ago."""
-        if self.settings.check_updates and time.time() - self.settings.last_update_check > UPDATE_CHECK_INTERVAL:
             self.updates.check(auto=True)
 
     def open_setup(self) -> None:
