@@ -78,9 +78,6 @@ class PreferencesDialog(QDialog):
         self.auto_start = QCheckBox("Start the queue when the app opens (otherwise it opens paused)")
         self.auto_start.setChecked(settings.auto_start)
         form.addRow(self.auto_start)
-        self.clipboard = QCheckBox("Pick up links copied to the clipboard")
-        self.clipboard.setChecked(settings.watch_clipboard)
-        form.addRow(self.clipboard)
 
         # Files
         form = _form(tabs, "Files")
@@ -186,7 +183,6 @@ class PreferencesDialog(QDialog):
         s.theme = self.theme.currentData()
         s.max_concurrent = self.concurrent.value()
         s.auto_start = self.auto_start.isChecked()
-        s.watch_clipboard = self.clipboard.isChecked()
         s.options = replace(
             s.options,
             filename_template=self.template.text().strip() or DEFAULT_TEMPLATE,

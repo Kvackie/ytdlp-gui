@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import APP_ID, APP_NAME, __version__, system
+from .. import APP_NAME, __version__, system
 from ..components import Components, old_executable
 from ..jobs import Job, Status
 from ..options import AUDIO_FORMATS, AUDIO_QUALITIES, VIDEO_CONTAINERS, VIDEO_QUALITIES, ToolPaths
@@ -94,7 +94,6 @@ class MainWindow(QMainWindow):
         self.updates.install_failed.connect(self._on_component_failed)
         self.updates.progress.connect(self._on_component_progress)
         self.updates.restart_requested.connect(self._offer_restart)
-        QGuiApplication.clipboard().dataChanged.connect(self._on_clipboard)
         QGuiApplication.styleHints().colorSchemeChanged.connect(self._on_system_theme)
 
         self._log_timer = QTimer(self, interval=300)
@@ -134,8 +133,7 @@ class MainWindow(QMainWindow):
 
         # Links
         self.url_box = QPlainTextEdit()
-        self.url_box.setPlaceholderText("Paste links here: one or many, from any site yt-dlp supports. "
-                                        "Ctrl+Enter adds them to the queue.")
+        self.url_box.setPlaceholderText("Paste link(s) here. Ctrl + Enter adds them to queue.")
         self.url_box.setFixedHeight(76)
         self.url_box.setTabChangesFocus(True)
         self.add_btn = QPushButton("Add to queue")
@@ -382,8 +380,6 @@ class MainWindow(QMainWindow):
         action(m, "Preferences…", self.open_preferences, QKeySequence.StandardKey.Preferences)
         m.addSeparator()
         action(m, "Open data folder", lambda: system.open_path(system.data_dir()))
-        if system.IS_LINUX:
-            action(m, "Add to the applications menu", self.install_desktop_entry)
 
         m = mb.addMenu("&Help")
         action(m, "Supported sites", lambda: QDesktopServices.openUrl(
@@ -515,17 +511,6 @@ class MainWindow(QMainWindow):
             self.queue.add([url], options)
             remaining = [u for u in extract_urls(self.url_box.toPlainText()) if u != url]
             self.url_box.setPlainText("\n".join(remaining))
-
-    def _on_clipboard(self) -> None:
-        if not self.settings.watch_clipboard:
-            return
-        present = set(extract_urls(self.url_box.toPlainText()))
-        fresh = [u for u in extract_urls(QGuiApplication.clipboard().text())
-                 if u not in present and not self.queue.has_url(u)]
-        if fresh:
-            text = self.url_box.toPlainText().rstrip()
-            self.url_box.setPlainText((text + "\n" if text else "") + "\n".join(fresh))
-            self.statusBar().showMessage(f"Picked up {len(fresh)} link(s) from the clipboard.", 4000)
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasText() or event.mimeData().hasUrls():
@@ -822,27 +807,6 @@ class MainWindow(QMainWindow):
         rows += ["", f"Qt {qVersion()} · Python {sys.version.split()[0]}"]
 
         QMessageBox.about(self, f"About {APP_NAME}", "<br>".join(rows))
-
-    def install_desktop_entry(self) -> None:
-        apps = Path.home() / ".local" / "share" / "applications"
-        icon_dir = Path.home() / ".local" / "share" / "icons" / "hicolor" / "256x256" / "apps"
-        try:
-            apps.mkdir(parents=True, exist_ok=True)
-            icon_dir.mkdir(parents=True, exist_ok=True)
-            icons.render(256).save(str(icon_dir / f"{APP_ID}.png"))
-            exec_line = f'"{sys.executable}"' + ("" if system.FROZEN else " -m ytdlp_gui") + " %U"
-            (apps / f"{APP_ID}.desktop").write_text(
-                "[Desktop Entry]\nType=Application\n"
-                f"Name={APP_NAME}\nComment=Download videos and audio with yt-dlp\n"
-                f"Exec={exec_line}\nPath={system.app_dir()}\nIcon={APP_ID}\nTerminal=false\n"
-                "Categories=Network;AudioVideo;\nStartupWMClass=ytdlp-gui\n",
-                encoding="utf-8",
-            )
-        except OSError as exc:
-            QMessageBox.warning(self, "Could not add the menu entry", str(exc))
-            return
-        QMessageBox.information(self, "Added", f"{APP_NAME} is now in your applications menu. "
-                                "If you move the executable, add it again.")
 
     # --- shutdown --------------------------------------------------------------------------------
     def closeEvent(self, event) -> None:

@@ -20,7 +20,6 @@ class Settings:
     auto_update: bool = True  # install yt-dlp and Deno updates without asking (FFmpeg is only offered)
     last_update_check: float = 0.0
     theme: str = "system"  # system | light | dark
-    watch_clipboard: bool = False
     setup_done: bool = False
     window_geometry: str = ""
     window_state: str = ""

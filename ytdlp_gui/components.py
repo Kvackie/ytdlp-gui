@@ -28,10 +28,9 @@ YTDLP_CHANNELS = {
     "nightly": "yt-dlp/yt-dlp-nightly-builds",
     "master": "yt-dlp/yt-dlp-master-builds",
 }
-FFMPEG_REPO = "yt-dlp/FFmpeg-Builds"
+# Builds of FFmpeg's stable releases (yt-dlp/FFmpeg-Builds only has daily builds of the development branch).
+FFMPEG_REPO = "BtbN/FFmpeg-Builds"
 DENO_REPO = "denoland/deno"
-# ffmpeg master builds are re-published daily; only suggest replacing a build once it is this old.
-FFMPEG_UPDATE_AGE_DAYS = 30
 
 
 @dataclass
@@ -315,14 +314,16 @@ class Ffmpeg(Component):
     version_args = ("-version",)
 
     def asset_name(self) -> str | None:
+        """The build that fits this system, as named in the release's files ("win64-gpl-shared"). The full
+        file name also holds the FFmpeg version, which is only known once the release has been looked at."""
         arch = system.machine()
         if system.IS_WINDOWS:
             # The "shared" builds are about half the size of the static ones.
-            name = {"x86_64": "win64", "aarch64": "winarm64", "x86": "win32"}.get(arch)
-            return f"ffmpeg-master-latest-{name}-gpl-shared.zip" if name else None
+            name = {"x86_64": "win64", "aarch64": "winarm64"}.get(arch)
+            return f"{name}-gpl-shared" if name else None
         if system.IS_LINUX and not system.is_musl():
             name = {"x86_64": "linux64", "aarch64": "linuxarm64"}.get(arch)
-            return f"ffmpeg-master-latest-{name}-gpl.tar.xz" if name else None
+            return f"{name}-gpl" if name else None
         return None
 
     def managed_path(self) -> Path:
@@ -334,6 +335,9 @@ class Ffmpeg(Component):
         return path.parent if path else None
 
     def parse_version(self, output: str) -> str | None:
+        release = re.search(r"ffmpeg version n?(\d+\.\d+(?:\.\d+)?)", output)
+        if release:  # a stable release, "n9.0-12-gabcdef0" from a release branch build
+            return release.group(1)
         match = re.search(r"ffmpeg version (\S+)", output)
         if not match:
             return None
@@ -344,20 +348,27 @@ class Ffmpeg(Component):
         return version
 
     def latest(self) -> Release:
-        asset = self.asset_name()
-        if not asset:
+        """The newest stable release, found in the checksum file that lists every build of the release."""
+        flavour = self.asset_name()
+        if not flavour:
             raise RuntimeError("There is no FFmpeg build for this platform; install it with your package manager.")
         sums = net.get_text(net.release_asset_url(FFMPEG_REPO, "latest", "checksums.sha256"))
-        sha = net.find_sha256(sums, asset)
-        if not sha:
-            raise RuntimeError(f"{asset} is missing from the FFmpeg build checksums.")
-        return Release(sha, "latest build", asset, net.release_asset_url(FFMPEG_REPO, "latest", asset), sha)
-
-    def update_available(self, release: Release) -> bool:
-        if not super().update_available(release):
-            return False
-        installed_at = self.state.get(self.key).get("installed_at") or 0
-        return time.time() - installed_at > FFMPEG_UPDATE_AGE_DAYS * 86400
+        # e.g. ffmpeg-n9.0-latest-win64-gpl-shared-9.0.zip
+        pattern = re.compile(rf"ffmpeg-n(\d+)\.(\d+)-latest-{re.escape(flavour)}-\1\.\2\.(?:zip|tar\.xz)")
+        best: tuple[tuple[int, int], str, str] | None = None
+        for line in sums.splitlines():
+            parts = line.split()
+            if len(parts) != 2:
+                continue
+            name = parts[1].lstrip("*")
+            match = pattern.fullmatch(name)
+            if match and (best is None or (int(match[1]), int(match[2])) > best[0]):
+                best = ((int(match[1]), int(match[2])), name, parts[0].lower())
+        if best is None:
+            raise RuntimeError("No stable FFmpeg build for this system was found.")
+        (major, minor), asset, sha = best
+        version = f"{major}.{minor}"
+        return Release(f"n{version}", version, asset, net.release_asset_url(FFMPEG_REPO, "latest", asset), sha)
 
     def _install_from(self, archive: Path, work: Path) -> None:
         def pick(member: str) -> str | None:

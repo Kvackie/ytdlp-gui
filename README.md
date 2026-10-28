@@ -26,7 +26,6 @@ then:
   ```bash
   chmod +x ytdlp-gui-linux-x86_64
   ```
-  Afterwards *Tools → Add to the applications menu* gives it a menu entry and icon.
 
 On first start a short setup offers to download the tools it needs (about 150–250 MB in total).
 
@@ -51,7 +50,7 @@ On first start a short setup offers to download the tools it needs (about 150–
     Right-click → *Retry from scratch* starts over.
   - Cancelling a download deletes its files. Removing a failed download deletes its downloaded parts.
   - *Clear* removes finished and cancelled downloads and keeps failed ones for retrying.
-- Light and dark theme (or follow the system), optional clipboard watching.
+- Light and dark theme (or follow the system).
 
 ## Updates
 
@@ -62,7 +61,7 @@ with them before it is used.
 | --- | --- | --- |
 | yt-dlp GUI | this app | [its releases](../../releases) |
 | yt-dlp | the downloader itself | [yt-dlp releases](https://github.com/yt-dlp/yt-dlp/releases) (stable, nightly or master channel) |
-| FFmpeg | merging video and audio, converting, embedding | [yt-dlp's FFmpeg builds](https://github.com/yt-dlp/FFmpeg-Builds) |
+| FFmpeg | merging video and audio, converting, embedding | [BtbN's builds](https://github.com/BtbN/FFmpeg-Builds) of the stable FFmpeg releases |
 | Deno | JavaScript runtime yt-dlp needs for full YouTube support | [Deno releases](https://github.com/denoland/deno/releases) |
 
 By default the app looks for updates when it starts:

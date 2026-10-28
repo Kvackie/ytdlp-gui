@@ -23,13 +23,13 @@ def as_platform(monkeypatch, os_name: str, arch: str, musl: bool = False):
 
 
 @pytest.mark.parametrize("os_name, arch, musl, ytdlp, ffmpeg, deno", [
-    ("windows", "x86_64", False, "yt-dlp.exe", "ffmpeg-master-latest-win64-gpl-shared.zip",
+    ("windows", "x86_64", False, "yt-dlp.exe", "win64-gpl-shared",
      "deno-x86_64-pc-windows-msvc.zip"),
-    ("windows", "aarch64", False, "yt-dlp_arm64.exe", "ffmpeg-master-latest-winarm64-gpl-shared.zip",
+    ("windows", "aarch64", False, "yt-dlp_arm64.exe", "winarm64-gpl-shared",
      "deno-aarch64-pc-windows-msvc.zip"),
-    ("linux", "x86_64", False, "yt-dlp_linux", "ffmpeg-master-latest-linux64-gpl.tar.xz",
+    ("linux", "x86_64", False, "yt-dlp_linux", "linux64-gpl",
      "deno-x86_64-unknown-linux-gnu.zip"),
-    ("linux", "aarch64", False, "yt-dlp_linux_aarch64", "ffmpeg-master-latest-linuxarm64-gpl.tar.xz",
+    ("linux", "aarch64", False, "yt-dlp_linux_aarch64", "linuxarm64-gpl",
      "deno-aarch64-unknown-linux-gnu.zip"),
     ("linux", "x86_64", True, "yt-dlp_musllinux", None, None),
 ])
@@ -53,6 +53,8 @@ def test_find_sha256_formats():
 def test_ffmpeg_version_parsing(comps):
     out = "ffmpeg version N-121690-g1a2b3c4d-20261026 Copyright (c) 2000-2026 the FFmpeg developers\n"
     assert comps.ffmpeg.parse_version(out) == "N-121690-g1a2b3c4d (2026-10-26)"
+    stable = "ffmpeg version n9.0-7-g0a1b2c3d-20261020 Copyright (c) 2000-2026 the FFmpeg developers\n"
+    assert comps.ffmpeg.parse_version(stable) == "9.0"
     assert comps.deno.parse_version("deno 2.9.8 (stable, release, x86_64-pc-windows-msvc)\n") == "2.9.8"
 
 
@@ -124,12 +126,29 @@ def test_ffmpeg_install_from_tar(monkeypatch, comps, tmp_path):
     monkeypatch.setattr(system, "IS_WINDOWS", False)
     monkeypatch.setattr(net, "download", _fake_download(buf.getvalue()))
     monkeypatch.setattr(type(comps.ffmpeg), "probe_version", lambda self, path: "N-1 (2026-10-26)")
-    comps.ffmpeg.install(Release("sha", "latest build", "ffmpeg.tar.xz", "u", None))
+    comps.ffmpeg.install(Release("n9.0", "9.0", "ffmpeg.tar.xz", "u", None))
     folder = comps.ffmpeg.managed_path().parent
     assert sorted(p.name for p in folder.iterdir()) == ["ffmpeg", "ffprobe"]
     assert comps.ffmpeg.location() == folder
-    # A fresh build of the rolling release is only offered once the installed one is old.
-    assert not comps.ffmpeg.update_available(Release("other", "latest build", "a", "u", None))
+    assert not comps.ffmpeg.update_available(Release("n9.0", "9.0", "a", "u", None))
+    assert comps.ffmpeg.update_available(Release("n9.1", "9.1", "a", "u", None))
+
+
+def test_ffmpeg_latest_is_the_newest_stable_release(monkeypatch, comps):
+    as_platform(monkeypatch, "windows", "x86_64")
+    a, b, c = "a" * 64, "b" * 64, "c" * 64
+    sums = "\n".join([
+        f"{a}  ffmpeg-master-latest-win64-gpl-shared.zip",
+        f"{a}  ffmpeg-n8.1-latest-win64-gpl-shared-8.1.zip",
+        f"{b}  ffmpeg-n9.0-latest-win64-gpl-shared-9.0.zip",
+        f"{c}  ffmpeg-n9.0-latest-win64-gpl-9.0.zip",
+        f"{c}  ffmpeg-n10.0-latest-linux64-gpl-10.0.tar.xz",
+    ])
+    monkeypatch.setattr(net, "get_text", lambda url: sums)
+    release = comps.ffmpeg.latest()
+    assert (release.ident, release.version, release.asset, release.sha256) == \
+        ("n9.0", "9.0", "ffmpeg-n9.0-latest-win64-gpl-shared-9.0.zip", b)
+    assert release.url.endswith("/BtbN/FFmpeg-Builds/releases/download/latest/" + release.asset)
 
 
 def test_version_key():

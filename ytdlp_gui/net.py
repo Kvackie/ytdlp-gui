@@ -12,7 +12,7 @@ from pathlib import Path
 
 from . import __version__
 
-USER_AGENT = f"ytdlp-gui/{__version__} (+https://github.com/yt-dlp/yt-dlp)"
+USER_AGENT = f"ytdlp-gui/{__version__} (+https://github.com/Kvackie/ytdlp-gui; +https://github.com/yt-dlp/yt-dlp)"
 TIMEOUT = 30
 
 # CA bundles of the common Linux distributions, used when the bundled OpenSSL looks in the wrong place.
