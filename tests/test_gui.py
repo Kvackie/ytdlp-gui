@@ -179,3 +179,43 @@ def test_retry_from_scratch_deletes_parts_first(qtbot, fake_ytdlp, tmp_path):
     q.retry([job.id], fresh=True)
     assert not (tmp_path / "Fake video [v3].mp4.part").exists()
     assert job.fresh and job.status == Status.QUEUED
+
+
+def test_no_widget_flashes_up_as_its_own_window(qtbot, monkeypatch):
+    """A widget shown before it has a parent briefly opens as a separate window."""
+    from PySide6.QtCore import QEvent, QObject
+    from PySide6.QtWidgets import QApplication
+
+    from ytdlp_gui.gui.components_dialog import ComponentsDialog
+    from ytdlp_gui.gui.preferences import PreferencesDialog
+
+    expected = {"MainWindow", "ComponentsDialog", "PreferencesDialog"}
+    stray = []
+
+    class Spy(QObject):
+        def eventFilter(self, obj, event):
+            if (event.type() == QEvent.Type.Show and obj.isWidgetType() and obj.isWindow()
+                    and obj.metaObject().className() not in expected):
+                stray.append(obj.metaObject().className())
+            return False
+
+    spy = Spy()
+    QApplication.instance().installEventFilter(spy)
+    try:
+        settings = Settings.load()
+        settings.setup_done = True
+        monkeypatch.setattr(MainWindow, "_startup", lambda self: None)
+        window = MainWindow(settings, Components())
+        qtbot.addWidget(window)
+        window.show()
+        window.updates.check = lambda auto=False: None
+        dialogs = [ComponentsDialog(window.updates, settings, parent=window),
+                   ComponentsDialog(window.updates, settings, setup=True, parent=window),
+                   PreferencesDialog(settings, window)]
+        for dialog in dialogs:
+            dialog.show()
+            dialog.close()
+        window.close()
+    finally:
+        QApplication.instance().removeEventFilter(spy)
+    assert stray == []

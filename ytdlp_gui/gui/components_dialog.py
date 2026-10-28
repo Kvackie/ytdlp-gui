@@ -36,7 +36,9 @@ class ComponentCard(QFrame):
         self.setObjectName("card")
         self.failed = ""
 
-        self.check = QCheckBox()
+        # Every widget gets its parent right away: showing or hiding one that has no parent yet briefly
+        # opens it as a window of its own.
+        self.check = QCheckBox(self)
         # A copy already installed on the system (e.g. Debian's ffmpeg package) is used as is.
         self.check.setChecked(comp.offered() and not comp.is_managed())
         self.check.setEnabled(comp.supported() and not comp.required)
@@ -44,25 +46,25 @@ class ComponentCard(QFrame):
         if comp.required:
             self.check.setToolTip("Required")
 
-        title = QLabel(f"<b>{comp.title}</b>")
-        self.status = QLabel()
+        title = QLabel(f"<b>{comp.title}</b>", self)
+        self.status = QLabel(self)
         self.status.setObjectName("muted")
         self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        desc = QLabel(comp.description)
+        desc = QLabel(comp.description, self)
         desc.setObjectName("muted")
         desc.setWordWrap(True)
         desc.setVisible(bool(comp.description))
 
-        self.bar = QProgressBar()
+        self.bar = QProgressBar(self)
         self.bar.setTextVisible(False)
-        self.phase = QLabel()
+        self.phase = QLabel(self)
         self.phase.setObjectName("muted")
 
-        self.action = QPushButton()
+        self.action = QPushButton(self)
         self.action.clicked.connect(self._on_action)
-        self.remove_btn = QPushButton("Remove")
+        self.remove_btn = QPushButton("Remove", self)
         self.remove_btn.clicked.connect(self._on_remove)
-        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn = QPushButton("Cancel", self)
         self.cancel_btn.clicked.connect(lambda: service.cancel_install(comp.key))
         for b in (self.action, self.remove_btn, self.cancel_btn):
             b.setVisible(not setup)
@@ -205,7 +207,7 @@ class ComponentsDialog(QDialog):
         self.channel.currentIndexChanged.connect(self._on_channel)
         prefs.addWidget(self.channel)
         prefs.addStretch(1)
-        self.check_btn = QPushButton("Check for updates")
+        self.check_btn = QPushButton("Check for updates", self)
         self.check_btn.clicked.connect(lambda: service.check())
         self.check_btn.setVisible(not setup)
         prefs.addWidget(self.check_btn)
@@ -220,7 +222,7 @@ class ComponentsDialog(QDialog):
         lay.addWidget(self.auto_check)
         lay.addWidget(self.auto_install)
 
-        self.info = QLabel()
+        self.info = QLabel(self)
         self.info.setObjectName("muted")
         self.info.setWordWrap(True)
         self.info.setVisible(not setup)  # nothing has been checked yet on first start
