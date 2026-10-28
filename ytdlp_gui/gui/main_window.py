@@ -725,10 +725,13 @@ class MainWindow(QMainWindow):
         if not self.settings.setup_done or self.components.ytdlp.path() is None:
             self.open_setup()
         else:
-            self._maybe_check_updates()
             self.queue.schedule()
+        # Every start, also right after the first-run setup; the hourly timer below waits between checks.
+        if self.settings.check_updates:
+            self.updates.check(auto=True)
 
     def _maybe_check_updates(self) -> None:
+        """While the app stays open: check again once the last check is a while ago."""
         if self.settings.check_updates and time.time() - self.settings.last_update_check > UPDATE_CHECK_INTERVAL:
             self.updates.check(auto=True)
 

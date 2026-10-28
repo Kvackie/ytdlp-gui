@@ -219,3 +219,24 @@ def test_no_widget_flashes_up_as_its_own_window(qtbot, monkeypatch):
     finally:
         QApplication.instance().removeEventFilter(spy)
     assert stray == []
+
+
+@pytest.mark.parametrize("setup_done", [True, False])
+def test_every_start_checks_for_updates(qtbot, monkeypatch, setup_done):
+    import time as time_module
+
+    settings = Settings.load()
+    settings.setup_done = setup_done
+    settings.last_update_check = time_module.time() - 60  # checked a minute ago, e.g. in Tools & updates
+    monkeypatch.setattr(MainWindow, "open_setup", lambda self: None)
+    window = MainWindow(settings, Components())
+    qtbot.addWidget(window)
+    calls = []
+    window.updates.check = lambda auto=False: calls.append(auto)
+    window._startup()
+    assert calls == [True]
+    settings.check_updates = False
+    calls.clear()
+    window._startup()
+    assert calls == []
+    window.close()
