@@ -89,10 +89,12 @@ jobs:
           "dist/${{ matrix.binary }}" --self-test selftest.json --install || { cat selftest.json; exit 1; }
           cat selftest.json
 
+      # No version in the name: the app's self-update looks for exactly these names, and an updated
+      # executable keeps the name it had.
       - name: Rename for upload
         run: |
           mkdir upload
-          mv "dist/${{ matrix.binary }}" "upload/ytdlp-gui-${{ steps.version.outputs.version }}-${{ matrix.asset_suffix }}"
+          mv "dist/${{ matrix.binary }}" "upload/ytdlp-gui-${{ matrix.asset_suffix }}"
 
       - uses: actions/upload-artifact@v5
         with:
@@ -126,7 +128,7 @@ jobs:
 
       - name: Self-test
         run: |
-          BIN="$(ls ytdlp-gui-*-linux-x86_64)"
+          BIN=ytdlp-gui-linux-x86_64
           chmod +x "$BIN"
           "./$BIN" --self-test selftest.json --install || { cat selftest.json; exit 1; }
           cat selftest.json

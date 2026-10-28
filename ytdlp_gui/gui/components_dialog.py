@@ -21,8 +21,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import system
-from ..components import YTDLP_CHANNELS, Component
+from .. import __version__, system
+from ..components import YTDLP_CHANNELS, App, Component
 from ..settings import Settings
 from .queue_model import human_bytes
 from .updates import UpdateService
@@ -37,11 +37,10 @@ class ComponentCard(QFrame):
         self.failed = ""
 
         self.check = QCheckBox()
-        # A copy already installed on the system (e.g. Debian's ffmpeg package) is fine to use as is.
-        self.check.setChecked(comp.supported() and not comp.is_managed()
-                              and (comp.required or not comp.system_path()))
+        # A copy already installed on the system (e.g. Debian's ffmpeg package) is used as is.
+        self.check.setChecked(comp.offered() and not comp.is_managed())
         self.check.setEnabled(comp.supported() and not comp.required)
-        self.check.setVisible(setup)
+        self.check.setVisible(setup and comp.offered())
         if comp.required:
             self.check.setToolTip("Required")
 
@@ -110,16 +109,21 @@ class ComponentCard(QFrame):
             self.bar.setValue(0)
 
         latest = service.latest.get(comp.key)
-        if not comp.supported() and not comp.path():
+        app = comp.key == App.key
+        if app and comp.restart_pending:
+            text = f"Version {__version__}  ·  <b>{comp.restart_pending} is installed</b>, restart to use it"
+        elif app and not comp.supported():
+            text = f"Version {__version__}  ·  updates itself only in the released Windows and Linux builds"
+        elif not comp.supported() and not comp.path():
             text = "No build is available for this system. Install it with your package manager."
         elif comp.is_managed():
-            text = f"Installed: {comp.installed_version() or 'unknown version'}"
+            text = f"{'Version' if app else 'Installed'}: {comp.installed_version() or 'unknown version'}"
             if service.update_available(comp.key):
                 text += f"  ·  <b>update available</b> ({latest.version})"
             elif latest:
                 text += "  ·  up to date"
         elif comp.system_path():
-            text = f"Using the system copy at {comp.system_path()}"
+            text = "Installed on this system"
         else:
             text = f"Not installed  ·  download {comp.download_size}"
         if self.failed:
@@ -130,20 +134,29 @@ class ComponentCard(QFrame):
 
         if not self._setup:
             self.cancel_btn.setVisible(installing)
-            self.action.setVisible(comp.supported() and not installing)
-            self.remove_btn.setVisible(comp.is_managed() and not installing)
-            if not comp.is_managed():
-                self.action.setText("Install")
-            elif service.update_available(comp.key):
-                self.action.setText("Update")
+            self.remove_btn.setVisible(comp.is_managed() and not installing and not app)
+            if app:
+                # Only ever "Update", never a reinstall; then "Restart" to switch to the new version.
+                self.action.setVisible(bool(comp.restart_pending)
+                                       or (service.update_available(comp.key) and not installing))
+                self.action.setText("Restart" if comp.restart_pending else "Update")
             else:
-                self.action.setText("Reinstall")
+                self.action.setVisible(comp.offered() and not installing)
+                if not comp.is_managed():
+                    self.action.setText("Install")
+                elif service.update_available(comp.key):
+                    self.action.setText("Update")
+                else:
+                    self.action.setText("Reinstall")
             self.action.setObjectName("primary" if self.action.text() != "Reinstall" else "")
             self.action.style().unpolish(self.action)
             self.action.style().polish(self.action)
 
     def _on_action(self) -> None:
         self.failed = ""
+        if self.comp.key == App.key and self.comp.restart_pending:
+            self.service.restart_requested.emit()
+            return
         if not self.service.install(self.comp.key):
             QMessageBox.information(self, "Downloads running",
                                     "Wait for the running downloads to finish (or cancel them) before updating.")
@@ -178,13 +191,15 @@ class ComponentsDialog(QDialog):
             "yt-dlp GUI runs yt-dlp and a few helper tools. They are downloaded once from their official "
             "GitHub releases, checked against the published checksums, and kept up to date for you."
             if setup else
-            "These tools are kept in the app's data folder and updated from their official GitHub releases."
+            "The app and its tools are updated from their official GitHub releases. Tools already installed "
+            "on this system are used as they are."
         )
         intro.setWordWrap(True)
         intro.setObjectName("muted")
         lay.addWidget(intro)
 
-        self.cards = {c.key: ComponentCard(c, service, setup, self) for c in service.components.all()}
+        shown = service.components.tools() if setup else service.components.all()
+        self.cards = {c.key: ComponentCard(c, service, setup, self) for c in shown}
         for card in self.cards.values():
             lay.addWidget(card)
             card.check.toggled.connect(self.refresh)
@@ -257,8 +272,7 @@ class ComponentsDialog(QDialog):
         self.check_btn.setText("Checking…" if self.service.checking else "Check for updates")
         last = self.settings.last_update_check
         checked = time.strftime("%Y-%m-%d %H:%M", time.localtime(last)) if last else "never"
-        where = system.bin_dir()
-        self.info.setText(f"Last checked: {checked}. Tools are stored in <a href='#'>{where}</a>")
+        self.info.setText(f"Last checked: {checked}.  <a href='#'>Open the tools folder</a>")
         if self.setup:
             self.go_btn.setEnabled(not self.service.installing())
             if not self.service.installing() and self.go_btn.text() != "Retry":

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
@@ -21,7 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import system
-from ..options import COOKIE_BROWSERS, DEFAULT_TEMPLATE, PLAYLIST_TEMPLATE
+from ..options import COOKIE_BROWSERS, DEFAULT_TEMPLATE, PLAYLIST_TEMPLATE, SAMPLE_INFO, preview_filename
 from ..settings import Settings
 
 TEMPLATE_HELP = ("Fields like %(title)s, %(id)s, %(uploader)s, %(upload_date)s, %(ext)s; "
@@ -40,6 +42,16 @@ def _hint(text: str) -> QLabel:
     label = QLabel(text)
     label.setObjectName("muted")
     label.setWordWrap(True)
+    return label
+
+
+def _preview() -> QLabel:
+    """One line under a file name field; a long name is cut off rather than widening the dialog."""
+    label = QLabel()
+    label.setObjectName("muted")
+    label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+    label.setMinimumWidth(1)
+    label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
     return label
 
 
@@ -63,42 +75,42 @@ class PreferencesDialog(QDialog):
         self.concurrent.setRange(1, 8)
         self.concurrent.setValue(settings.max_concurrent)
         form.addRow("Simultaneous downloads:", self.concurrent)
-        self.auto_start = QCheckBox("Start downloads as soon as they are added")
+        self.auto_start = QCheckBox("Start the queue when the app opens (otherwise it opens paused)")
         self.auto_start.setChecked(settings.auto_start)
         form.addRow(self.auto_start)
         self.clipboard = QCheckBox("Pick up links copied to the clipboard")
         self.clipboard.setChecked(settings.watch_clipboard)
         form.addRow(self.clipboard)
-        data = QHBoxLayout()
-        path = QLineEdit(str(system.data_dir()))
-        path.setReadOnly(True)
-        open_btn = QPushButton("Open")
-        open_btn.clicked.connect(lambda: system.open_path(system.data_dir()))
-        data.addWidget(path, 1)
-        data.addWidget(open_btn)
-        form.addRow("Data folder:", data)
-        form.addRow(_hint(
-            "Settings, the queue and the downloaded tools live here, next to the executable. Move both "
-            "together to take the app elsewhere; delete both to remove every trace."))
 
         # Files
         form = _form(tabs, "Files")
+        if o.mode == "audio":
+            self._ext = "m4a" if o.audio_format == "best" else o.audio_format
+        else:
+            self._ext = "mp4" if o.container == "auto" else o.container
         self.template = QLineEdit(o.filename_template)
         self.template.setPlaceholderText(DEFAULT_TEMPLATE)
+        self.template.setToolTip(TEMPLATE_HELP)
+        self.preview = _preview()
         form.addRow("File name:", self.template)
+        form.addRow("", self.preview)
         self.pl_template = QLineEdit(o.playlist_template)
         self.pl_template.setPlaceholderText(PLAYLIST_TEMPLATE)
+        self.pl_template.setToolTip(TEMPLATE_HELP)
+        self.pl_preview = _preview()
         form.addRow("File name (playlists):", self.pl_template)
-        form.addRow(_hint(TEMPLATE_HELP))
+        form.addRow("", self.pl_preview)
         self.restrict = QCheckBox("Use only ASCII characters without spaces in file names")
         self.restrict.setChecked(o.restrict_filenames)
         form.addRow(self.restrict)
+        for signal in (self.template.textChanged, self.pl_template.textChanged, self.restrict.toggled):
+            signal.connect(self._update_previews)
+        self._update_previews()
         self.archive = QCheckBox("Remember downloaded videos and skip them next time")
         self.archive.setChecked(o.use_archive)
-        self.archive.setToolTip(f"Kept in {system.data_dir() / 'archive.txt'}")
         form.addRow(self.archive)
         self.pl_items = QLineEdit(o.playlist_items)
-        self.pl_items.setPlaceholderText("e.g. 1-10,15,-5:")
+        self.pl_items.setPlaceholderText("1-10,15,-5:")
         form.addRow("Playlist items:", self.pl_items)
 
         # Post-processing
@@ -129,19 +141,17 @@ class PreferencesDialog(QDialog):
         form.addRow("Cookies from browser:", self.browser)
         cookie_row = QHBoxLayout()
         self.cookies = QLineEdit(o.cookies_file)
-        self.cookies.setPlaceholderText("Netscape cookies.txt (used when no browser is chosen)")
+        self.cookies.setPlaceholderText("cookies.txt (Used when no browser is selected)")
         browse = QPushButton("Browse…")
         browse.clicked.connect(self._pick_cookies)
         cookie_row.addWidget(self.cookies, 1)
         cookie_row.addWidget(browse)
         form.addRow("Cookies file:", cookie_row)
-        form.addRow(_hint("Cookies let yt-dlp see what your logged-in browser sees: age-restricted or members-only "
-                          "videos, and fewer \"confirm you're not a bot\" blocks."))
         self.rate = QLineEdit(o.rate_limit)
-        self.rate.setPlaceholderText("e.g. 5M or 500K (empty = unlimited)")
+        self.rate.setPlaceholderText("500K or 5M (empty = unlimited)")
         form.addRow("Speed limit:", self.rate)
         self.proxy = QLineEdit(o.proxy)
-        self.proxy.setPlaceholderText("e.g. socks5://127.0.0.1:1080")
+        self.proxy.setPlaceholderText("socks5://127.0.0.1:1080")
         form.addRow("Proxy:", self.proxy)
 
         # Advanced
@@ -149,7 +159,7 @@ class PreferencesDialog(QDialog):
         self.extra = QLineEdit(o.extra_args)
         self.extra.setPlaceholderText("--limit-rate 2M --concurrent-fragments 4")
         form.addRow("Extra yt-dlp options:", self.extra)
-        form.addRow(_hint("Added to every download. Quote arguments containing spaces."))
+        form.addRow(_hint("Quote arguments containing spaces."))
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
@@ -157,6 +167,14 @@ class PreferencesDialog(QDialog):
         lay = QVBoxLayout(self)
         lay.addWidget(tabs)
         lay.addWidget(buttons)
+
+    def _update_previews(self) -> None:
+        info = {**SAMPLE_INFO, "ext": self._ext}
+        restrict = self.restrict.isChecked()
+        for edit, label, fallback in ((self.template, self.preview, DEFAULT_TEMPLATE),
+                                      (self.pl_template, self.pl_preview, PLAYLIST_TEMPLATE)):
+            name = preview_filename(edit.text().strip() or fallback, info, restrict)
+            label.setText(name.replace("/", "\\") if system.IS_WINDOWS else name)
 
     def _pick_cookies(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Cookies file", "", "Cookies (*.txt);;All files (*)")

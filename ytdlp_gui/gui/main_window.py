@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import APP_ID, APP_NAME, __version__, system
-from ..components import Components
+from ..components import Components, old_executable
 from ..jobs import Job, Status
 from ..options import AUDIO_FORMATS, AUDIO_QUALITIES, VIDEO_CONTAINERS, VIDEO_QUALITIES, ToolPaths
 from ..settings import Settings
@@ -73,6 +73,7 @@ class MainWindow(QMainWindow):
         self._log_job: int | None = None
         self._log_seq = 0
         self._setup_open = False
+        self._restart = False
 
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(icons.app_icon())
@@ -94,6 +95,7 @@ class MainWindow(QMainWindow):
         self.updates.installed.connect(self._on_component_installed)
         self.updates.install_failed.connect(self._on_component_failed)
         self.updates.progress.connect(self._on_component_progress)
+        self.updates.restart_requested.connect(self._offer_restart)
         QGuiApplication.clipboard().dataChanged.connect(self._on_clipboard)
         QGuiApplication.styleHints().colorSchemeChanged.connect(self._on_system_theme)
 
@@ -181,7 +183,8 @@ class MainWindow(QMainWindow):
         self.retry_btn.clicked.connect(lambda: self.queue.retry(self.selected_ids()))
         self.remove_btn = QPushButton("Remove")
         self.remove_btn.clicked.connect(self.remove_selected)
-        clear_btn = QPushButton("Clear finished")
+        clear_btn = QPushButton("Clear")
+        clear_btn.setToolTip("Remove every download that is no longer queued or running")
         clear_btn.clicked.connect(self.queue.clear_finished)
         for b in (self.run_btn, self.cancel_btn, self.retry_btn, self.remove_btn, clear_btn):
             bar.addWidget(b)
@@ -375,7 +378,7 @@ class MainWindow(QMainWindow):
         self.pause_action = action(m, "Pause queue", lambda: self._set_paused(not self.queue.paused), "Ctrl+P")
         action(m, "Retry failed", self.retry_failed)
         action(m, "Remove selected", self.remove_selected, QKeySequence.StandardKey.Delete)
-        action(m, "Clear finished", self.queue.clear_finished)
+        action(m, "Clear", self.queue.clear_finished)
 
         m = mb.addMenu("&Tools")
         action(m, "Tools && updates…", self.open_components)
@@ -459,9 +462,8 @@ class MainWindow(QMainWindow):
             return 0
         self._save_options_from_ui()
         self.queue.add(urls, options or self.settings.options)
-        self.statusBar().showMessage(f"Added {len(urls)} link{'s' if len(urls) != 1 else ''}.", 4000)
-        if self.queue.paused and self.settings.auto_start and self.tool_paths():
-            self._set_paused(False)
+        added = f"Added {len(urls)} link{'s' if len(urls) != 1 else ''}"
+        self.statusBar().showMessage(added + (" (the queue is paused)." if self.queue.paused else "."), 4000)
         return len(urls)
 
     def add_from_box(self) -> None:
@@ -505,7 +507,7 @@ class MainWindow(QMainWindow):
             return
         tools = self.tool_paths()
         if tools is None:
-            self._on_tools_missing()
+            self._ask_for_ytdlp()
             return
         self._save_options_from_ui()
         url = urls[0]
@@ -565,10 +567,16 @@ class MainWindow(QMainWindow):
                           if j.status in (Status.FAILED, Status.PARTIAL, Status.CANCELLED)])
 
     def _set_paused(self, paused: bool) -> None:
-        if not paused and self.tool_paths() is None:
-            self._on_tools_missing()
-            return
         self.queue.set_paused(paused)
+        if not paused and self.tool_paths() is None:
+            self._ask_for_ytdlp()
+
+    def _ask_for_ytdlp(self) -> None:
+        """The user wants to download something but yt-dlp is missing: offer the setup."""
+        if self.updates.installing("yt-dlp"):
+            self.statusBar().showMessage("Waiting for yt-dlp to finish installing…", 5000)
+        else:
+            self.open_setup()
 
     def _context_menu(self, pos) -> None:
         index = self.table.indexAt(pos)
@@ -625,7 +633,9 @@ class MainWindow(QMainWindow):
         if q.blocked:
             parts.append("updating tools…")
         self.summary.setText("  ·  ".join(parts) if parts else "empty" if not q.jobs else "all done")
-        self.run_btn.setText("Resume" if q.paused else "Pause")
+        self.run_btn.setText("Resume queue" if q.paused else "Pause queue")
+        self.run_btn.setToolTip("Running downloads finish; queued ones wait until the queue is resumed"
+                                if not q.paused else "Start the queued downloads")
         self.run_btn.setObjectName("primary" if q.paused and waiting else "")
         self.run_btn.style().unpolish(self.run_btn)
         self.run_btn.style().polish(self.run_btn)
@@ -697,6 +707,11 @@ class MainWindow(QMainWindow):
 
     # --- components ------------------------------------------------------------------------------
     def _startup(self) -> None:
+        if system.IS_WINDOWS and system.FROZEN:
+            try:  # the executable an update replaced; still locked if that process hasn't quite exited
+                old_executable().unlink(missing_ok=True)
+            except OSError:
+                pass
         if not self.settings.setup_done or self.components.ytdlp.path() is None:
             self.open_setup()
         else:
@@ -728,21 +743,38 @@ class MainWindow(QMainWindow):
 
     def _after_components_changed(self) -> None:
         self._update_badge()
-        if self.tool_paths() and self.settings.auto_start and self.queue.paused:
-            self.queue.set_paused(False)
         self.queue.schedule()
 
     def _on_tools_missing(self) -> None:
         if self.updates.installing("yt-dlp"):
             self.statusBar().showMessage("Waiting for yt-dlp to finish installing…", 5000)
-            return
-        self.open_setup()
+        elif not self._setup_open:
+            # Not the setup dialog: the queue retries on every change, which would reopen it over and over.
+            self.statusBar().showMessage("yt-dlp is not installed, so queued downloads wait. "
+                                         "Install it under Tools → Tools & updates.", 10000)
 
     def _on_component_installed(self, key: str, auto: bool) -> None:
         comp = self.components.get(key)
+        if comp is self.components.app:
+            self._update_badge()
+            self._offer_restart()
+            return
         self.statusBar().showMessage(f"{comp.title} {'updated' if auto else 'installed'}: "
                                      f"{comp.installed_version()}", 8000)
         self._after_components_changed()
+
+    def _offer_restart(self) -> None:
+        version = self.components.app.restart_pending
+        running = self.queue.running
+        note = (f"\n\n{running} running download(s) will stop and stay in the queue."
+                if running else "")
+        answer = QMessageBox.question(self, "Update installed",
+                                      f"{APP_NAME} {version} is installed. Restart now to use it?{note}")
+        if answer == QMessageBox.StandardButton.Yes:
+            self._restart = True
+            self.close()
+        else:
+            self.statusBar().showMessage(f"{APP_NAME} {version} will be used from the next start.", 8000)
 
     def _on_component_failed(self, key: str, error: str) -> None:
         comp = self.components.get(key)
@@ -776,15 +808,15 @@ class MainWindow(QMainWindow):
 
     def about(self) -> None:
         rows = [f"<b>{APP_NAME}</b> {__version__}", "A desktop front-end for yt-dlp.", ""]
-        for comp in self.components.all():
+        for comp in self.components.tools():
             if comp.is_managed():
                 state = comp.installed_version() or "installed"
             elif comp.system_path():
-                state = f"system copy ({comp.system_path()})"
+                state = "installed on this system"
             else:
                 state = "not installed"
             rows.append(f"{comp.title}: {state}")
-        rows += ["", f"Data folder: {system.data_dir()}", f"Qt {qVersion()} · Python {sys.version.split()[0]}"]
+        rows += ["", f"Qt {qVersion()} · Python {sys.version.split()[0]}"]
 
         QMessageBox.about(self, f"About {APP_NAME}", "<br>".join(rows))
 
@@ -811,7 +843,7 @@ class MainWindow(QMainWindow):
 
     # --- shutdown --------------------------------------------------------------------------------
     def closeEvent(self, event) -> None:
-        if self.queue.running:
+        if self.queue.running and not self._restart:  # a restart was already confirmed
             answer = QMessageBox.question(
                 self, "Quit", f"{self.queue.running} download(s) still running. Stop them and quit? "
                 "Unfinished downloads stay in the queue and resume next time.")
@@ -831,3 +863,8 @@ class MainWindow(QMainWindow):
         except OSError:
             pass
         event.accept()
+        if self._restart:
+            try:
+                system.start_new_instance()
+            except OSError as exc:
+                QMessageBox.warning(self, "Restart", f"Could not start the new version: {exc}\n\nStart it yourself.")

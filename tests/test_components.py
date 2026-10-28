@@ -1,6 +1,8 @@
+import hashlib
 import io
 import tarfile
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -128,3 +130,67 @@ def test_ffmpeg_install_from_tar(monkeypatch, comps, tmp_path):
     assert comps.ffmpeg.location() == folder
     # A fresh build of the rolling release is only offered once the installed one is old.
     assert not comps.ffmpeg.update_available(Release("other", "latest build", "a", "u", None))
+
+
+def test_version_key():
+    assert components.version_key("0.2.0") > components.version_key("0.1.9")
+    assert components.version_key("v0.10.0") > components.version_key("0.9.0")
+    assert components.version_key("0.2.0") > components.version_key("0.2.0-dev.7")
+    assert components.version_key("0.2") == components.version_key("0.2.0")
+
+
+@pytest.mark.parametrize("os_name", ["windows", "linux"])
+def test_app_updates_its_own_executable(monkeypatch, tmp_path, comps, os_name):
+    as_platform(monkeypatch, os_name, "x86_64")
+    folder = tmp_path / "app"
+    folder.mkdir()
+    exe = folder / "my-renamed-copy.exe"
+    exe.write_bytes(b"old build")
+    monkeypatch.setattr(system, "FROZEN", True)
+    monkeypatch.setattr(components.sys, "executable", str(exe))
+    monkeypatch.setattr(components, "__version__", "0.1.0")
+    new = b"new build"
+
+    def fake_download(url, dest, progress=None, cancelled=None):
+        dest.write_bytes(new)
+        return hashlib.sha256(new).hexdigest()
+
+    monkeypatch.setattr(net, "download", fake_download)
+    app = comps.app
+    asset = app.asset_name()
+    assert asset == ("ytdlp-gui-windows-x64.exe" if os_name == "windows" else "ytdlp-gui-linux-x86_64")
+    release = Release("v0.2.0", "0.2.0", asset, "https://example/x", hashlib.sha256(new).hexdigest())
+    assert app.update_available(release)
+    assert not app.update_available(Release("v0.1.0", "0.1.0", asset, "", None))
+
+    app.install(release)
+    assert exe.read_bytes() == new
+    assert app.restart_pending == "0.2.0"
+    assert not app.update_available(release)
+    leftovers = sorted(p.name for p in folder.iterdir())
+    assert leftovers == (["my-renamed-copy.exe", "my-renamed-copy.exe.old"] if os_name == "windows"
+                         else ["my-renamed-copy.exe"])
+
+
+def test_app_rejects_a_bad_checksum(monkeypatch, tmp_path, comps):
+    as_platform(monkeypatch, "linux", "x86_64")
+    folder = tmp_path / "app"
+    folder.mkdir()
+    exe = folder / "ytdlp-gui"
+    exe.write_bytes(b"old build")
+    monkeypatch.setattr(system, "FROZEN", True)
+    monkeypatch.setattr(components.sys, "executable", str(exe))
+    monkeypatch.setattr(net, "download", lambda url, dest, *a: dest.write_bytes(b"evil") and "0" * 64)
+    with pytest.raises(RuntimeError, match="Checksum"):
+        comps.app.install(Release("v9", "9", "ytdlp-gui-linux-x86_64", "https://example/x", "1" * 64))
+    assert exe.read_bytes() == b"old build"
+    assert [p.name for p in folder.iterdir()] == ["ytdlp-gui"]
+
+
+def test_system_ffmpeg_is_not_offered(monkeypatch, comps):
+    monkeypatch.setattr(components.Ffmpeg, "system_path", lambda self: Path("/usr/bin/ffmpeg"))
+    monkeypatch.setattr(components.YtDlp, "system_path", lambda self: Path("/usr/bin/yt-dlp"))
+    monkeypatch.setattr(components.Ffmpeg, "asset_name", lambda self: "ffmpeg.zip")
+    monkeypatch.setattr(components.YtDlp, "asset_name", lambda self: "yt-dlp")
+    assert not comps.ffmpeg.offered()
+    assert comps.ytdlp.offered()  # an outdated system yt-dlp is worth replacing

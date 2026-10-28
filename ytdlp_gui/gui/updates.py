@@ -1,11 +1,11 @@
-"""Checks for and installs new versions of the managed tools, without disturbing running downloads."""
+"""Checks for and installs new versions of the app and the managed tools, without disturbing running downloads."""
 from __future__ import annotations
 
 import time
 
 from PySide6.QtCore import QObject, Signal
 
-from ..components import Components, Release
+from ..components import App, Components, Release
 from ..settings import Settings
 from .queue import QueueManager
 from .tasks import Task, run_task
@@ -20,6 +20,7 @@ class UpdateService(QObject):
     installed = Signal(str, bool)  # component key, was an automatic update
     install_failed = Signal(str, str)
     busy_changed = Signal()
+    restart_requested = Signal()
 
     def __init__(self, components: Components, settings: Settings, queue: QueueManager):
         super().__init__()
@@ -98,10 +99,14 @@ class UpdateService(QObject):
                 self.install(key)
 
     def install(self, key: str) -> bool:
-        """Download and install the latest build of a component. False if downloads are running."""
+        """Download and install the latest build of a component. False if downloads are running.
+
+        The app's own update is the exception: swapping the executable doesn't touch running downloads.
+        """
         if self.installing(key):
             return True
-        if self.queue.running:
+        tool = key != App.key
+        if tool and self.queue.running:
             return False
         comp = self.components.get(key)
 
@@ -115,7 +120,8 @@ class UpdateService(QObject):
         task.succeeded.connect(lambda release: self._on_installed(key, release))
         task.failed.connect(lambda err: self._on_install_failed(key, err))
         self._installing[key] = task
-        self.queue.set_blocked(True)
+        if tool:
+            self.queue.set_blocked(True)
         self.busy_changed.emit()
         task.start()
         return True
@@ -129,7 +135,7 @@ class UpdateService(QObject):
         self._installing.pop(key, None)
         auto = key in self._auto
         self._auto.discard(key)
-        if not self._installing:
+        if self.queue.blocked and all(k == App.key for k in self._installing):
             self.queue.set_blocked(False)
         self.busy_changed.emit()
         return auto
@@ -147,7 +153,7 @@ class UpdateService(QObject):
         self.install_failed.emit(key, error)
 
     def remove(self, key: str) -> bool:
-        if self.queue.running or self.installing(key):
+        if key == App.key or self.queue.running or self.installing(key):
             return False
         self.components.get(key).remove()
         self.busy_changed.emit()

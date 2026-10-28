@@ -79,11 +79,11 @@ def test_queue_cancel(qtbot, fake_ytdlp, tmp_path):
     assert running.status == Status.CANCELLED
 
 
-def test_missing_ytdlp_pauses_queue(qtbot):
+def test_missing_ytdlp_leaves_queue_state_alone(qtbot):
     q = QueueManager(lambda: None)
     with qtbot.waitSignal(q.tools_missing, timeout=1000):
         q.add(["https://example.com/1"], DownloadOptions())
-    assert q.paused
+    assert not q.paused  # only the user pauses the queue
     assert q.jobs[1].status == Status.QUEUED
 
 
@@ -103,3 +103,28 @@ def test_main_window_adds_links(qtbot, monkeypatch, tmp_path):
     assert window.url_box.toPlainText() == ""
     window.close()
     assert Settings.load().options.mode == "audio"
+
+
+def test_clear_removes_every_finished_job(qtbot):
+    q = QueueManager(lambda: None, paused=True)
+    jobs = q.add([f"https://example.com/{i}" for i in range(5)], DownloadOptions())
+    statuses = (Status.DONE, Status.FAILED, Status.PARTIAL, Status.CANCELLED, Status.QUEUED)
+    for job, status in zip(jobs, statuses, strict=True):
+        job.status = status
+    q.clear_finished()
+    assert list(q.jobs) == [jobs[-1].id]
+
+
+def test_adding_links_does_not_resume_a_paused_queue(qtbot, monkeypatch):
+    settings = Settings.load()
+    settings.setup_done = True
+    settings.auto_start = False
+    monkeypatch.setattr(MainWindow, "_startup", lambda self: None)
+    window = MainWindow(settings, Components())
+    qtbot.addWidget(window)
+    assert window.queue.paused and window.run_btn.text() == "Resume queue"
+    window.add_urls(["https://example.com/a"])
+    assert window.queue.paused
+    window._set_paused(True)
+    assert window.run_btn.text() == "Resume queue"
+    window.close()

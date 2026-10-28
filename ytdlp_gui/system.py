@@ -156,6 +156,17 @@ def kill_tree(proc: subprocess.Popen) -> None:
         proc.kill()
 
 
+def start_new_instance() -> None:
+    """Launch a fresh copy of the app (after an update), detached from this one."""
+    args = [sys.executable] if FROZEN else [sys.executable, "-m", "ytdlp_gui"]
+    if IS_WINDOWS:
+        kwargs = {"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP}
+    else:
+        kwargs = {"start_new_session": True}
+    subprocess.Popen(args, cwd=str(app_dir()), env=child_env(), stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kwargs)
+
+
 def run_quiet(args: list[str], timeout: float = 30) -> subprocess.CompletedProcess:
     return subprocess.run(
         args,

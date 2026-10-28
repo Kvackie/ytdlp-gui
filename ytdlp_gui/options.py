@@ -1,7 +1,9 @@
 """Download options and their translation into a yt-dlp command line."""
 from __future__ import annotations
 
+import re
 import shlex
+import time
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
@@ -193,6 +195,64 @@ def build_args(o: DownloadOptions, urls: list[str], tools: ToolPaths) -> list[st
     args.append("--")
     args += urls
     return args
+
+
+# --- file name preview ------------------------------------------------------------------------------
+# Made-up metadata to show what an output template turns into, without asking yt-dlp.
+SAMPLE_INFO = {
+    "title": "How to Bake Bread", "fulltitle": "How to Bake Bread", "id": "a1B2c3D4e5F",
+    "uploader": "Kitchen Basics", "channel": "Kitchen Basics", "uploader_id": "@kitchenbasics",
+    "upload_date": "20240315", "release_date": "20240315", "timestamp": 1710500000, "duration": 754,
+    "duration_string": "12:34", "view_count": 12345, "like_count": 678, "extractor": "youtube",
+    "extractor_key": "Youtube", "webpage_url_domain": "youtube.com", "format_id": "137+140",
+    "resolution": "1920x1080", "height": 1080, "width": 1920, "fps": 30, "vcodec": "avc1", "acodec": "mp4a",
+    "playlist": "Baking Basics", "playlist_title": "Baking Basics", "playlist_id": "PLx1y2z3",
+    "playlist_index": "03", "playlist_count": 12, "n_entries": 12, "playlist_autonumber": 3, "autonumber": 1,
+}
+_FIELD_RE = re.compile(r"%%|%\((?P<key>[^)]*)\)(?P<fmt>[-#0+ ]*\d*(?:\.\d+)?[diouxXeEfFgGcrsaBjlqDSU])")
+
+
+def _restricted(text: str) -> str:
+    """Roughly what --restrict-filenames does to a field value."""
+    text = text.replace('"', "").replace(":", "_-")
+    text = re.sub(r"[!&'()\[\]{}$;`^,#\s/\\]|[^\x00-\x7f]", "_", text)
+    return re.sub(r"_+", "_", text).strip("_")
+
+
+def preview_filename(template: str, info: dict | None = None, restrict: bool = False) -> str:
+    """Render an output template the way yt-dlp would for `info`, covering its common syntax:
+    alternatives (a,b), dates (>%Y), replacements (&text {}), defaults (|text) and %-formatting."""
+    info = SAMPLE_INFO if info is None else info
+
+    def field(match: re.Match) -> str:
+        if match.group(0) == "%%":
+            return "%"
+        key, fmt = match["key"], match["fmt"]
+        key, has_default, default = key.partition("|")
+        key, has_repl, repl = key.partition("&")
+        key, has_date, date_fmt = key.partition(">")
+        value = next((info[k.strip()] for k in key.split(",") if info.get(k.strip()) not in (None, "")), None)
+        if value is None:
+            return default if has_default else "NA"
+        if has_date:
+            try:
+                value = time.strftime(date_fmt, time.strptime(str(value), "%Y%m%d"))
+            except ValueError:
+                pass
+        if has_repl:
+            value = repl.replace("{}", str(value))
+        try:
+            if fmt[-1] in "diouxX":
+                value = ("%" + fmt) % int(value)
+            elif fmt[-1] in "eEfFgG":
+                value = ("%" + fmt) % float(value)
+            else:
+                value = ("%" + fmt[:-1] + "s") % value
+        except (TypeError, ValueError):
+            value = str(value)
+        return _restricted(value) if restrict else value.replace("/", "⧸")
+
+    return _FIELD_RE.sub(field, template)
 
 
 def info_args(url: str, tools: ToolPaths, o: DownloadOptions | None = None) -> list[str]:

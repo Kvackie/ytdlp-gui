@@ -14,14 +14,14 @@ Get the file for your system from the [latest release](../../releases/latest):
 
 | System | File |
 | --- | --- |
-| Windows 10/11 (64-bit) | `ytdlp-gui-<version>-windows-x64.exe` |
-| Linux x86-64 (Debian 12+, Ubuntu 22.04+, …) | `ytdlp-gui-<version>-linux-x86_64` |
+| Windows 10/11 (64-bit) | `ytdlp-gui-windows-x64.exe` |
+| Linux x86-64 (Debian 12+, Ubuntu 22.04+, …) | `ytdlp-gui-linux-x86_64` |
 
 - **Windows:** double-click the `.exe`. SmartScreen may warn about an unrecognized app the first time:
   choose *More info → Run anyway*.
 - **Linux:** make it executable once, then start it:
   ```bash
-  chmod +x ytdlp-gui-*-linux-x86_64
+  chmod +x ytdlp-gui-linux-x86_64
   ```
   Afterwards *Tools → Add to the applications menu* gives it a menu entry and icon.
 
@@ -38,6 +38,7 @@ Get the file for your system from the [latest release](../../releases/latest):
   SponsorBlock cutting, browser cookies for age-restricted or members-only videos, speed limit, proxy,
   "skip what I already downloaded", custom file names, and any other yt-dlp option you want to add.
 - **Queue that survives restarts:** unfinished downloads pick up where they left off next time.
+  *Pause queue* lets running downloads finish but starts no new ones until you resume it.
 - Light and dark theme, optional clipboard watching.
 
 ## The tools it manages
@@ -52,7 +53,10 @@ Every download is checked against the checksums published with the release befor
 By default the app looks for updates when it starts and installs new yt-dlp and Deno versions by itself
 (after running downloads finish); FFmpeg updates are offered under *Tools → Tools & updates*, where you
 can also switch yt-dlp to the nightly channel when a site breaks. If FFmpeg or Deno are already installed
-on your system (e.g. `apt install ffmpeg`), you can skip downloading them and those copies are used.
+on your system (e.g. `apt install ffmpeg`), those copies are used and not downloaded again.
+
+The app updates itself the same way: when a new release is out, *Tools → Tools & updates* offers it;
+the new version replaces the executable in place and is used after a restart.
 
 ## Where things are kept
 

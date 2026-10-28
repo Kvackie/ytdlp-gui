@@ -1,7 +1,17 @@
 from pathlib import Path
 
 from ytdlp_gui import options
-from ytdlp_gui.options import DownloadOptions, ToolPaths, build_args, format_args, split_args
+from ytdlp_gui.options import (
+    DEFAULT_TEMPLATE,
+    PLAYLIST_TEMPLATE,
+    SAMPLE_INFO,
+    DownloadOptions,
+    ToolPaths,
+    build_args,
+    format_args,
+    preview_filename,
+    split_args,
+)
 
 TOOLS = ToolPaths(ytdlp=Path("yt-dlp"), ffmpeg_dir=Path("ff"), deno=Path("deno/deno"), archive_file=Path("a.txt"))
 
@@ -82,3 +92,15 @@ def test_options_roundtrip_ignores_unknown_keys():
     o = DownloadOptions(mode="audio", audio_format="flac")
     data = o.to_dict() | {"removed_in_a_later_version": 1}
     assert DownloadOptions.from_dict(data) == o
+
+
+def test_preview_filename():
+    assert preview_filename(DEFAULT_TEMPLATE, {**SAMPLE_INFO, "ext": "mp4"}) == "How to Bake Bread [a1B2c3D4e5F].mp4"
+    assert preview_filename(PLAYLIST_TEMPLATE, {**SAMPLE_INFO, "ext": "mp4"}) == \
+        "Baking Basics/03 - How to Bake Bread [a1B2c3D4e5F].mp4"
+    info = {"title": "A: b/c", "id": "x", "ext": "mkv", "upload_date": "20240315", "n": 7}
+    assert preview_filename("%(playlist_title|Single videos)s/%(playlist_index&{} - |)s%(title)s", info) == \
+        "Single videos/A: b⧸c"
+    assert preview_filename("%(upload_date>%Y-%m-%d)s %(n)03d %(missing)s %(uploader,id)s 100%%", info) == \
+        "2024-03-15 007 NA x 100%"
+    assert preview_filename("%(title)s.%(ext)s", info, restrict=True) == "A_-_b_c.mkv"

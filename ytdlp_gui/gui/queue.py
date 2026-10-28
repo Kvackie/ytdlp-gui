@@ -112,7 +112,8 @@ class QueueManager(QObject):
                 self.job_removed.emit(job_id)
 
     def clear_finished(self) -> None:
-        self.remove([j.id for j in self.jobs.values() if j.status in (Status.DONE, Status.CANCELLED)])
+        """Drop every job that is neither queued nor running: done, failed, partial and cancelled ones."""
+        self.remove([j.id for j in self.jobs.values() if j.status.finished])
 
     def shutdown(self) -> None:
         """Stop every running download (on quit)."""
@@ -133,8 +134,7 @@ class QueueManager(QObject):
     def _start(self, job: Job) -> bool:
         tools = self._tools()
         if tools is None:
-            self.paused = True
-            self.activity_changed.emit()
+            # Only the user pauses the queue; jobs simply wait until yt-dlp is installed.
             self.tools_missing.emit()
             return False
 

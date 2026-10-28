@@ -10,16 +10,19 @@ import os
 import re
 import shutil
 import stat
+import sys
 import tarfile
 import threading
 import time
+import urllib.error
 import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import net, system
+from . import APP_NAME, __version__, net, system
 
+APP_REPO = "Kvackie/ytdlp-gui"
 YTDLP_CHANNELS = {
     "stable": "yt-dlp/yt-dlp",
     "nightly": "yt-dlp/yt-dlp-nightly-builds",
@@ -98,6 +101,11 @@ class Component:
 
     def is_managed(self) -> bool:
         return self.managed_path().is_file()
+
+    def offered(self) -> bool:
+        """Whether to offer our own copy. Not when the system provides one, except for yt-dlp: an outdated
+        system yt-dlp (e.g. Debian's package) is the usual reason downloads break."""
+        return self.supported() and (self.is_managed() or self.required or not self.system_path())
 
     def path(self) -> Path | None:
         """The binary to use: our own copy if there is one, otherwise one from PATH."""
@@ -406,15 +414,122 @@ class Deno(Component):
         _replace_dir(staged, self.managed_path().parent)
 
 
+def version_key(version: str) -> tuple:
+    """Sortable form of "1.2.3"; a suffixed build such as "1.2.3-dev.4" sorts before "1.2.3"."""
+    match = re.match(r"v?(\d+(?:\.\d+)*)(.*)", version.strip())
+    if not match:
+        return ((0, 0, 0, 0), 0)
+    numbers = tuple(int(n) for n in match.group(1).split("."))[:4]
+    return (numbers + (0,) * (4 - len(numbers)), 0 if match.group(2) else 1)
+
+
+class App(Component):
+    """This program. An update swaps the executable in place; it takes effect on the next start."""
+
+    key = "app"
+    title = APP_NAME
+    description = "This program, updated from its GitHub releases."
+    download_size = "~40 MB"
+
+    def __init__(self, state: State):
+        super().__init__(state)
+        self.restart_pending = ""  # version installed by this run, used after a restart
+
+    def asset_name(self) -> str | None:
+        if not system.FROZEN or system.machine() != "x86_64":
+            return None
+        if system.IS_WINDOWS:
+            return "ytdlp-gui-windows-x64.exe"
+        if system.IS_LINUX and not system.is_musl():
+            return "ytdlp-gui-linux-x86_64"
+        return None
+
+    def managed_path(self) -> Path:
+        return Path(sys.executable).resolve()
+
+    def system_path(self) -> Path | None:
+        return None
+
+    def is_managed(self) -> bool:
+        return system.FROZEN
+
+    def installed_version(self) -> str | None:
+        return __version__
+
+    def latest(self) -> Release:
+        asset = self.asset_name()
+        if not asset:
+            raise RuntimeError(f"There is no {APP_NAME} build for this system.")
+        try:
+            tag = net.latest_release_tag(APP_REPO)
+        except urllib.error.HTTPError as err:
+            if err.code == 404:
+                raise RuntimeError(f"No public releases found at github.com/{APP_REPO}.") from err
+            raise
+        sums = net.get_text(net.release_asset_url(APP_REPO, tag, "SHA256SUMS"))
+        sha = net.find_sha256(sums, asset)
+        if not sha:
+            raise RuntimeError(f"{asset} is not part of release {tag}.")
+        return Release(tag, tag.lstrip("v"), asset, net.release_asset_url(APP_REPO, tag, asset), sha)
+
+    def update_available(self, release: Release) -> bool:
+        return (self.is_managed() and not self.restart_pending
+                and version_key(release.version) > version_key(__version__))
+
+    def install(self, release: Release, progress: ProgressFn | None = None,
+                cancelled: Callable[[], bool] | None = None) -> None:
+        exe = self.managed_path()
+        new = exe.with_name(exe.name + ".new")
+        try:
+            def report(done: int, total: int) -> None:
+                if progress:
+                    progress(f"Downloading {release.asset}", done, total)
+
+            digest = net.download(release.url, new, report, cancelled)
+            if release.sha256 and digest != release.sha256:
+                raise RuntimeError(f"Checksum mismatch for {release.asset}. The download was discarded.")
+            _make_executable(new)
+            if system.IS_WINDOWS:
+                # A running .exe can't be overwritten, but it can be renamed out of the way.
+                old = old_executable()
+                old.unlink(missing_ok=True)
+                os.replace(exe, old)
+                try:
+                    os.replace(new, exe)
+                except OSError:
+                    os.replace(old, exe)
+                    raise
+            else:
+                os.replace(new, exe)  # the running program keeps its (now unlinked) file
+        except PermissionError as err:
+            raise RuntimeError(f"Could not replace {exe.name}: {err.strerror}") from err
+        finally:
+            new.unlink(missing_ok=True)
+        self.restart_pending = release.version
+
+    def remove(self) -> None:
+        raise RuntimeError(f"{APP_NAME} can't remove itself.")
+
+
+def old_executable() -> Path:
+    """Where a Windows update parks the previous executable until it is no longer running."""
+    exe = Path(sys.executable).resolve()
+    return exe.with_name(exe.name + ".old")
+
+
 class Components:
     def __init__(self):
         self.state = State(system.bin_dir() / "components.json")
         self.ytdlp = YtDlp(self.state)
         self.ffmpeg = Ffmpeg(self.state)
         self.deno = Deno(self.state)
+        self.app = App(self.state)
+
+    def tools(self) -> list[Component]:
+        return [self.ytdlp, self.ffmpeg, self.deno]
 
     def all(self) -> list[Component]:
-        return [self.ytdlp, self.ffmpeg, self.deno]
+        return [self.app, *self.tools()]
 
     def get(self, key: str) -> Component:
         return next(c for c in self.all() if c.key == key)
